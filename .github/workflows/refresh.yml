@@ -1,0 +1,11 @@
+# Optional: keeps data fresh and grades finished games even if the Render instance sleeps (free plan).
+# Add repo secrets API_URL (https://your-app.onrender.com) and ADMIN_TOKEN.
+name: refresh-sharp-money
+on:
+  schedule: [{ cron: "*/15 * * * *" }]
+  workflow_dispatch: {}
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl -fsS -m 120 -X POST "${{ secrets.API_URL }}/api/refresh" -H "X-Admin-Token: ${{ secrets.ADMIN_TOKEN }}"

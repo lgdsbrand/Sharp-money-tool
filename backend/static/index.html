@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Sharp Money Tool</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css?v=2.0.1">
+<link rel="stylesheet" href="/static/extra.css?v=2.0.1">
+</head>
+<body>
+<noscript><p style="padding:20px;color:#f0a3a8">This dashboard needs JavaScript.</p></noscript>
+<script>
+/* If anything in the dashboard script crashes, show it on screen instead of staying blank. */
+window.addEventListener('error', function (e) {
+  var b = document.getElementById('error-banner'), t = document.getElementById('error-text');
+  if (b && t) { b.hidden = false; t.textContent = 'Script error: ' + (e.message || e.error) + ' (' + (e.filename || '').split('/').pop() + ':' + e.lineno + '). Press Ctrl+Shift+R to reload the latest files.'; }
+});
+</script>
+<div id="auth-screen" class="auth-screen" hidden>
+  <form class="auth-card" id="auth-form">
+    <div class="brand"><div class="brand-mark">S</div><div><b>SHARP<span>EDGE</span></b><small>MARKET INTELLIGENCE</small></div></div>
+    <h2 id="auth-title">Log in</h2>
+    <label id="auth-name-row" hidden>Name<input id="auth-name" type="text" autocomplete="name" placeholder="Your name"></label>
+    <label>Email<input id="auth-email" type="email" autocomplete="email" required placeholder="you@example.com"></label>
+    <label>Password<input id="auth-pass" type="password" autocomplete="current-password" required minlength="8" placeholder="At least 8 characters"></label>
+    <p class="auth-error" id="auth-error" hidden></p>
+    <button class="btn primary" type="submit" id="auth-submit">Log in</button>
+    <p class="auth-switch"><span id="auth-switch-text">No account yet?</span> <a href="#" id="auth-switch">Create one</a></p>
+  </form>
+</div>
+<div class="app-shell">
+  <div class="backdrop" id="backdrop"></div>
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><div class="brand-mark">S</div><div><b>SHARP<span>EDGE</span></b><small>MARKET INTELLIGENCE</small></div></div>
+    <div class="side-label">WORKSPACE</div>
+    <nav id="nav">
+      <button class="nav active" data-view="overview"><i>◫</i> Overview</button>
+      <button class="nav" data-view="board"><i>▤</i> Market board</button>
+      <button class="nav" data-view="plays"><i>◎</i> Suggested plays <em id="play-count">0</em></button>
+      <button class="nav" data-view="nightly"><i>☾</i> Nightly log</button>
+      <button class="nav" data-view="bankroll"><i>◈</i> Bankroll</button>
+      <button class="nav" data-view="profile"><i>☺</i> Profile</button>
+    </nav>
+    <div class="side-label providers-label">DATA PROVIDERS</div>
+    <div id="providers"></div>
+    <div class="sidebar-bottom">
+      <button class="user-chip" id="user-chip" title="Open profile"><div class="avatar" id="avatar">?</div><div><b id="chip-name">Your profile</b><small id="chip-sub">Set up</small></div><span>›</span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <button class="hamburger" id="menu-btn" aria-label="Open menu" aria-expanded="false"><span></span><span></span><span></span></button>
+      <div class="title-block"><div class="eyebrow">SPORTSBOOK MARKET INTELLIGENCE</div><h1 id="page-title">Market overview</h1></div>
+      <div class="top-actions">
+        <span class="live-indicator" id="mode-chip"><i></i> LOADING</span>
+        <button class="icon-btn" id="refresh" title="Refresh now">↻</button>
+        <div class="date-chip" id="date-chip"></div>
+      </div>
+    </header>
+
+    <div class="demo-banner" id="demo-banner" hidden><span>ⓘ</span><div><b>Preview environment</b><small>All market values, teams, odds and signals are illustrative sample data. Switch DEMO_MODE off and add your API keys to go live.</small></div><span class="banner-tag">NOT LIVE</span></div>
+    <div class="demo-banner err" id="error-banner" hidden><span>⚠</span><div><b>Can't reach the API</b><small id="error-text">Is the server running?</small></div></div>
+
+    <!-- OVERVIEW -->
+    <section id="view-overview" class="view active">
+      <div class="filter-row">
+        <div class="sport-tabs" id="sport-tabs"></div>
+        <div class="search-box"><input id="search" type="search" placeholder="Search a team or game…" autocomplete="off" aria-label="Search teams or games"><div class="suggest" id="suggest" hidden></div></div>
+        <div class="slider-box"><label for="min-liq">MIN LIQUIDITY</label><b id="min-liq-val">$100K</b><input id="min-liq" type="range" min="0" max="1000000" step="10000" value="100000"></div>
+      </div>
+      <div class="metric-grid" id="metrics"></div>
+
+      <div class="section-heading"><div><h2>Top sharp plays</h2><p>Where the exchange money is lopsided. Heavy sharp means 65%+ of the money on one side.</p></div><span class="result-count" id="top-count"></span></div>
+      <div class="table-wrap"><table><thead><tr><th>GAME</th><th>SHARP SIDE</th><th>EXCHANGE MONEY</th><th>PUBLIC ON THIS SIDE</th><th>MODEL</th><th>BEST EV</th><th>FLAGS</th><th></th></tr></thead><tbody id="top-rows"></tbody></table></div>
+
+      <div class="section-heading gap"><div><h2>Sharp vs public</h2><p>Games where the public is on one side and the big money is on the other.</p></div><span class="result-count" id="disc-count"></span></div>
+      <div class="table-wrap"><table><thead><tr><th>GAME</th><th>SHARP LEAN</th><th>PUBLIC LEAN (BETS / HANDLE)</th><th>EXCHANGE MONEY</th><th>FLAGS</th><th></th></tr></thead><tbody id="disc-rows"></tbody></table></div>
+      <p class="fine" id="thresholds"></p>
+    </section>
+
+    <!-- MARKET BOARD -->
+    <section id="view-board" class="view">
+      <div class="section-heading"><div><h2>Full market board</h2><p>Every game above your minimum, source by source, both sides.</p></div><span class="result-count" id="board-count"></span></div>
+      <div id="board-cards" class="market-cards"></div>
+    </section>
+
+    <!-- PLAYS -->
+    <section id="view-plays" class="view">
+      <div class="section-heading"><div><h2>Suggested plays tracker</h2><p>Save a play from the dashboard, record the result, and watch your record and ROI.</p></div><span class="result-count" id="tracked-count"></span></div>
+      <div class="metric-grid" id="play-stats"></div>
+      <div class="panel add-play"><h3>Add a play manually</h3>
+        <form id="play-form" class="inline-form">
+          <div class="search-box"><input name="description" id="play-desc" placeholder="Type a team or game, e.g. Celtics ML" autocomplete="off" required><div class="suggest" id="play-suggest" hidden></div></div>
+          <input name="odds" type="number" step="1" placeholder="American odds, e.g. -110" required>
+          <input name="stake" type="number" min="0" step="0.01" placeholder="Stake" required>
+          <button class="btn primary" type="submit">Add play</button>
+        </form>
+      </div>
+      <div class="plays-tools"><div class="search-box"><input id="play-search" type="search" placeholder="Search your tracked plays or a team…" autocomplete="off" aria-label="Search plays"><div class="suggest" id="play-search-suggest" hidden></div></div></div>
+      <div class="panel tracker-panel"><div id="tracked-plays" class="tracked-plays"></div></div>
+    </section>
+
+    <!-- NIGHTLY -->
+    <section id="view-nightly" class="view">
+      <div class="section-heading"><div><h2>Nightly log</h2><p>Every night the tool logs the heavy sharp plays before tip-off at a flat unit stake, then grades them from the final scores.</p></div><span class="result-count" id="nightly-count"></span></div>
+      <div class="metric-grid" id="nightly-stats"></div>
+      <div id="nightly-days"></div>
+    </section>
+
+    <!-- BANKROLL -->
+    <section id="view-bankroll" class="view">
+      <div class="section-heading"><div><h2>Bankroll &amp; risk calculator</h2><p>Estimate stake sizing before recording a play. This is a planning calculator, not a betting recommendation.</p></div></div>
+      <div class="bankroll-grid">
+        <section class="panel calc-panel"><h3>Stake calculator</h3>
+          <label>Available bankroll ($)<input id="bankroll-input" type="number" min="0" value="1000"></label>
+          <label>American odds<input id="calc-odds" type="number" value="-110"></label>
+          <label>Flat risk per play (%)<input id="risk-input" type="number" min="0" max="100" step="0.25" value="1"></label>
+          <div class="stake-result"><small>Flat stake at selected risk</small><strong id="stake-result">$10.00</strong><div id="potential-return"></div></div>
+          <hr>
+          <label>Your estimated win probability (%) <span class="hint">use the fair % from the +EV table</span><input id="win-prob" type="number" min="1" max="99" step="0.1" value="55"></label>
+          <label>Kelly fraction <span class="hint">0.25 = quarter Kelly (safer)</span><input id="kelly-input" type="number" min="0.05" max="1" step="0.05" value="0.25"></label>
+          <div class="stake-result kelly"><small>Kelly stake (capped at 5% of bankroll)</small><strong id="kelly-result">$0.00</strong><div id="kelly-note"></div></div>
+        </section>
+        <section class="panel"><h3>Risk snapshot</h3>
+          <div class="risk-row"><span>Bankroll</span><b id="risk-bankroll"></b></div>
+          <div class="risk-row"><span>Flat risk per play</span><b id="risk-pct"></b></div>
+          <div class="risk-row"><span>Flat stake</span><b id="risk-stake"></b></div>
+          <div class="risk-row"><span>Profit if won at shown odds</span><b id="risk-profit"></b></div>
+          <div class="risk-row"><span>Plays in a row lost to lose 25% (flat)</span><b id="risk-streak"></b></div>
+          <p class="risk-note">The calculator does not place bets, connect to an account or guarantee outcomes. Betting always carries risk. Set a responsible limit and verify all prices independently.</p>
+        </section>
+      </div>
+    </section>
+
+    <!-- PROFILE -->
+    <section id="view-profile" class="view">
+      <div class="section-heading"><div><h2>Profile &amp; settings</h2><p>Saved in this browser. Your numbers here pre-fill the whole dashboard.</p></div></div>
+      <div class="profile-grid">
+        <section class="panel"><h3>Profile</h3>
+          <div class="profile-head"><div class="avatar big" id="profile-avatar">?</div><div><b id="profile-title">Your profile</b><small>Local to this browser</small></div></div>
+          <label>Display name<input id="set-name" type="text" placeholder="Your name"></label>
+          <label>Email <span class="hint">optional, only shown here</span><input id="set-email" type="email" placeholder="you@example.com"></label>
+        </section>
+        <section class="panel"><h3>Preferences</h3>
+          <label>Default sport<select id="set-sport"></select></label>
+          <label>Default minimum liquidity ($)<input id="set-minliq" type="number" min="0" step="10000"></label>
+          <label>Bankroll ($)<input id="set-bankroll" type="number" min="0"></label>
+          <label>Flat risk per play (%)<input id="set-risk" type="number" min="0" max="100" step="0.25"></label>
+          <label>Kelly fraction<input id="set-kelly" type="number" min="0.05" max="1" step="0.05"></label>
+          <label>Unit size for tracked plays ($)<input id="set-unit" type="number" min="0" step="1"></label>
+        </section>
+        <section class="panel"><h3>Account</h3>
+          <div class="profile-head"><div class="avatar big" id="acct-avatar">?</div><div><b id="acct-name">Not signed in</b><small id="acct-email"></small></div></div>
+          <p class="risk-note" id="acct-note">Your tracked plays are private to your account.</p>
+          <div class="btn-row"><button class="btn" id="signout">Sign out</button></div>
+        </section>
+        <section class="panel"><h3>Access</h3>
+          <label>Admin token <span class="hint">only needed if the server has ADMIN_TOKEN set</span><input id="set-token" type="password" autocomplete="off" placeholder="leave empty for local use"></label>
+          <p class="risk-note">The token is only sent to your own API when you add, change or delete a play. It is stored in this browser only.</p>
+          <div class="btn-row"><button class="btn primary" id="save-settings">Save settings</button><button class="btn" id="reset-settings">Reset</button></div>
+        </section>
+        <section class="panel wide"><div class="panel-title"><div><h3>Data connections</h3><p>What is connected right now, and what still needs a key.</p></div><span class="subtle" id="conn-mode"></span></div><div id="connections"></div></section>
+      </div>
+    </section>
+
+    <footer>SHARPEDGE · SHARP MONEY TOOL v2.0 <span id="foot-note"></span></footer>
+  </main>
+</div>
+<div class="toast" id="toast" hidden></div>
+<script src="/static/app.js?v=2.0.1"></script>
+</body>
+</html>
