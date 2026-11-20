@@ -84,7 +84,11 @@ class SupabaseStore:
     def __init__(self, url: str, key: str, transport=None):
         self.transport = transport  # tests inject a fake PostgREST here
         self.base = f"{url}/rest/v1"
-        self.h = {"apikey": key, "Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+        # legacy service_role keys are JWTs (eyJ...) and go in both headers; the newer sb_secret_... keys are not JWTs
+        # and must only be sent as `apikey`
+        self.h = {"apikey": key, "Content-Type": "application/json"}
+        if key.startswith("eyJ"):
+            self.h["Authorization"] = f"Bearer {key}"
 
     async def _req(self, method: str, path: str, **kw):
         async with httpx.AsyncClient(timeout=20, transport=self.transport) as c:
