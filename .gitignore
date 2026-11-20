@@ -9,3 +9,7 @@ venv/
 diagnose_*.txt
 diagnose_*.json
 .pytest_cache/
+
+.env.*
+!.env.example
+*.log
