@@ -80,6 +80,9 @@ class Settings:
     MAX_EV_PCT = _float("MAX_EV_PCT", 25.0)  # edges above this are treated as bad data and ignored
 
     # --- nightly log (auto-logs tonight's heavy sharp plays, then grades them) ------
+    # Team / league logos are loaded by the browser from this URL pattern ({sport} {slug}); set empty to turn logos off.
+    TEAM_LOGO_URL = os.getenv("TEAM_LOGO_URL", "https://a.espncdn.com/i/teamlogos/{sport}/500/{slug}.png")
+    LEAGUE_LOGO_URL = os.getenv("LEAGUE_LOGO_URL", "https://a.espncdn.com/i/teamlogos/leagues/500/{slug}.png")
     NIGHTLY_ENABLED = _bool("NIGHTLY_ENABLED", True)
     NIGHTLY_UNIT = _float("NIGHTLY_UNIT", 25)  # flat stake per logged play, in your currency
     NIGHTLY_MIN_TOTAL = _float("NIGHTLY_MIN_TOTAL", 100_000)  # only log plays with at least this much exchange money

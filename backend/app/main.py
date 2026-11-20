@@ -15,6 +15,7 @@ import mimetypes
 from pydantic import BaseModel
 
 from . import auth, pipeline
+from .pipeline import scrub
 from .analysis import american_to_decimal, build_game_view, kelly_stake
 from .config import settings
 from .sources import odds_api
@@ -197,7 +198,7 @@ async def sharp(
     visible = sorted((v for v in views if v["visible"]), key=lambda v: v["total"], reverse=True)
 
     has = lambda v, *types: any(f["type"] in types for f in v["flags"])  # noqa: E731
-    top_plays = [v for v in visible if has(v, "heavy_sharp", "big_money")][:15]
+    top_plays = [v for v in visible if has(v, "heavy_sharp", "big_money") or v.get("heavy_market")][:15]
     discrepancies = sorted((v for v in visible if v["conflict"] or has(v, "fade")),
                            key=lambda v: (not has(v, "fade"), -v["total"]))[:15]
     return {
@@ -213,7 +214,10 @@ async def sharp(
         },
         "top_plays": top_plays, "discrepancies": discrepancies, "games": visible,
         "thresholds": {"heavy_sharp_pct": settings.HEAVY_SHARP_PCT, "fade_public_pct": settings.FADE_PUBLIC_PCT,
-                       "big_money": settings.BIG_MONEY_TOTAL, "min_ev_pct": settings.MIN_EV_PCT},
+                       "big_money": settings.BIG_MONEY_TOTAL, "min_ev_pct": settings.MIN_EV_PCT,
+                       "max_ev_pct": settings.MAX_EV_PCT, "nightly_unit": settings.NIGHTLY_UNIT,
+                       "nightly_min_total": settings.NIGHTLY_MIN_TOTAL},
+        "logos": {"team": settings.TEAM_LOGO_URL, "league": settings.LEAGUE_LOGO_URL},
     }
 
 
@@ -229,9 +233,9 @@ async def sources(_user: Optional[dict] = Depends(need_user)):
             m["ok"] = m["ok"] and st["ok"]
             m["mode"] = st["mode"]
             if st.get("error"):
-                m.setdefault("_err", {}).setdefault(st["error"], []).append(s.upper())
-            if st.get("note") and not st["note"].startswith("Odds API credits") and st["note"] not in m["notes"]:
-                m["notes"].append(st["note"])
+                m.setdefault("_err", {}).setdefault(scrub(st["error"]), []).append(s.upper())
+            if st.get("note") and not st["note"].startswith("Odds API credits") and scrub(st["note"]) not in m["notes"]:
+                m["notes"].append(scrub(st["note"]))
     for m in merged.values():   # one line per distinct error instead of one per sport
         for err, sps in m.pop("_err", {}).items():
             m["errors"].append(err if len(sps) == len(settings.SPORTS) else f"{', '.join(sps)}: {err}")

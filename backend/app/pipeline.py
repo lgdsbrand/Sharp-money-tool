@@ -19,14 +19,24 @@ from .teams import canon, match_pair, norm_team, same_team
 _odds_cache: dict[str, tuple[float, list]] = {}
 
 
+import re as _re
+_SECRET = _re.compile(r"(api[_-]?key|token|apikey)=[^&\s'\"]+", _re.I)
+
+
+def scrub(text):
+    """Never show an API key in an error message (the URL of a failed request contains it)."""
+    return _SECRET.sub(r"\1=***", text) if isinstance(text, str) else text
+
+
 def _status(name, mode, ok, games=0, error=None, note=None):
+    error, note = scrub(error), scrub(note)
     return {"name": name, "mode": mode, "ok": ok, "games": games, "error": error, "note": note}
 
 
 _SRC_CACHE: dict = {}
 # Slow-moving or throttled feeds are not re-fetched on every 2-minute refresh (avoids 429 / blocks).
-_TTL = {"novig": 300, "dk_splits": 300, "prophetx": 120}
-_TIMEOUT = {"novig": 90, "dk_splits": 90, "prophetx": 60}
+_TTL = {"novig": 300, "dk_splits": 300, "prophetx": 120, "novig_alts": 300, "prophetx_alts": 120, "kalshi_alts": 120}
+_TIMEOUT = {"novig": 90, "dk_splits": 90, "prophetx": 60, "novig_alts": 75, "prophetx_alts": 45, "kalshi_alts": 45}
 
 
 async def _run(name: str, factory, statuses: dict, sport: str = ""):
@@ -55,6 +65,33 @@ async def _run(name: str, factory, statuses: dict, sport: str = ""):
         return hit[1]
     statuses[name] = _status(name, mode, False, 0, err)
     return []
+
+
+def attach_alts(slate, recs: list[dict]) -> int:
+    """Merge spread / total records from any source into g["alts"]["spread:-3.5"] = {mtype, line (home handicap or
+    points), liquidity: {book: {side: $}}}. Spread sides are team codes; total sides are OVER / UNDER."""
+    n = 0
+    for r in recs:
+        g = slate.get(r["away"], r["home"], r.get("start"), create=False)
+        if not g:
+            continue
+        if r["mtype"] == "spread":
+            if r.get("home_line") is not None:
+                line = float(r["home_line"])
+            elif r.get("team_line"):
+                team, tl_ = r["team_line"]
+                line = float(tl_) if canon(team, g["away"], g["home"], slate.sport) == g["home"] else -float(tl_)
+            else:
+                continue
+            liq = slate.relabel(g, r["liquidity"])
+        else:
+            line, liq = float(r["line"]), dict(r["liquidity"])
+        e = g.setdefault("alts", {}).setdefault(f"{r['mtype']}:{line:g}", {"mtype": r["mtype"], "line": line, "liquidity": {}})
+        slot = e["liquidity"].setdefault(r["book"], {})
+        for k, v in liq.items():
+            slot[k] = slot.get(k, 0) + v
+        n += 1
+    return n
 
 
 class Slate:
@@ -141,6 +178,8 @@ async def refresh(sport: str, store) -> dict:
         mode = "demo"
         for n in ("kalshi", "novig", "prophetx", "odds_api", "dk_splits"):
             statuses[n] = _status(n, "demo", True, len(slate.games))
+        for g in slate.games:
+            g["alts"] = demo.alts(g)
         model = demo.model_picks(sport)
     else:
         mode = "live"
@@ -178,6 +217,17 @@ async def refresh(sport: str, store) -> dict:
             if g:
                 g["public"] = {"bets": slate.relabel(g, {norm_team(k, sport): v for k, v in s["bets"].items()}),
                                "handle": slate.relabel(g, {norm_team(k, sport): v for k, v in (s.get("handle") or {}).items()})}
+        # spread / total markets (best effort: a failure here never touches the moneyline view)
+        alt_tasks = {}
+        for ex, mod, on in (("kalshi", kalshi, settings.KALSHI_ENABLED), ("novig", novig, settings.NOVIG_ENABLED),
+                            ("prophetx", prophetx, settings.PROPHETX_ENABLED and bool(settings.PROPHETX_AFFILIATE_KEY))):
+            if on:
+                alt_tasks[ex] = _run(f"{ex}_alts", (lambda m=mod: m.fetch_alts(sport)), {}, sport)
+        alt_res = dict(zip(alt_tasks, await asyncio.gather(*alt_tasks.values())))
+        for ex, recs in alt_res.items():
+            n = attach_alts(slate, recs or [])
+            if ex in statuses:
+                statuses[ex]["alts"] = n
         # drop games with no exchange data at all - nothing to show
         slate.games = [g for g in slate.games if g["liquidity"]]
         model = await _model_picks(sport, store)

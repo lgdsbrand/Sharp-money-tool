@@ -123,6 +123,59 @@ def ev_table(game: dict) -> dict:
     }
 
 
+# ------------------------------------------------------------- market types
+def _fmt_line(x: float) -> str:
+    return f"{x:+g}"
+
+
+def side_label(mtype: str, line: float | None, side: str, away: str, home: str) -> str:
+    """Plain label for one side of a market, e.g. 'MIN ML', 'SF -3.5', 'Over 44.5'."""
+    if mtype == "moneyline":
+        return f"{side} ML"
+    if mtype == "total":
+        return f"{'Over' if side == 'OVER' else 'Under'} {line:g}"
+    return f"{side} {_fmt_line(line if side == home else -line)}"
+
+
+def market_view(mtype: str, line: float | None, liquidity: dict, away: str, home: str) -> Optional[dict]:
+    sides = ("OVER", "UNDER") if mtype == "total" else (away, home)
+    lean = sharp_lean(liquidity, sides)
+    if lean["total"] <= 0:
+        return None
+    side = lean["side"]
+    return {
+        "type": mtype, "line": line, "sides": list(sides), "total": lean["total"], "pct": lean["pct"],
+        "totals": {k: round(v) for k, v in lean["totals"].items()},
+        "side": side, "side_pct": lean["side_pct"],
+        "label": side_label(mtype, line, side, away, home),
+        "side_labels": {s: side_label(mtype, line, s, away, home) for s in sides},
+        "liquidity": liquidity,
+        "heavy": lean["side_pct"] >= settings.HEAVY_SHARP_PCT,
+    }
+
+
+def build_markets(raw: dict, ml_liquidity: dict, away: str, home: str) -> list[dict]:
+    """Moneyline plus the biggest spread line and the biggest total line (most exchange dollars)."""
+    out = []
+    ml = market_view("moneyline", None, ml_liquidity, away, home)
+    if ml:
+        out.append(ml)
+    for mtype in ("spread", "total"):
+        cands = [e for e in (raw.get("alts") or {}).values() if e.get("mtype") == mtype]
+        best, best_total = None, 0.0
+        for e in cands:
+            sides = ("OVER", "UNDER") if mtype == "total" else (away, home)
+            tot = sharp_lean(e["liquidity"], sides)["total"]
+            if tot > best_total:
+                best, best_total = e, tot
+        if best:
+            mv = market_view(mtype, best["line"], best["liquidity"], away, home)
+            if mv:
+                mv["n_lines"] = len(cands)
+                out.append(mv)
+    return out
+
+
 # ------------------------------------------------------- full game assembly
 def build_game_view(raw: dict, min_liquidity: float, bankroll: float = 0.0, kelly_fraction: float = 0.25) -> dict:
     """Turn one raw snapshot game into what the dashboard shows (lean, flags, EV, model agreement)."""
@@ -168,7 +221,12 @@ def build_game_view(raw: dict, min_liquidity: float, bankroll: float = 0.0, kell
         elif side:
             model_status = "disagrees"
 
+    markets = build_markets(raw, raw.get("liquidity", {}), a, h)
+    heavy = [m for m in markets if m["heavy"] and m["total"] >= min_liquidity]
+    top_market = max(heavy, key=lambda m: m["total"]) if heavy else next((m for m in markets if m["type"] == "moneyline"), None)
+
     view = {
+        "markets": markets, "top_market": top_market, "heavy_market": bool(heavy),
         "key": raw["key"], "sport": raw.get("sport", "nba"), "away": a, "home": h,
         "start": raw.get("start"),
         "liquidity": raw.get("liquidity", {}),

@@ -6,8 +6,8 @@
 <title>Sharp Money Tool</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css?v=2.0.1">
-<link rel="stylesheet" href="/static/extra.css?v=2.0.1">
+<link rel="stylesheet" href="/static/style.css?v=2.1.1">
+<link rel="stylesheet" href="/static/extra.css?v=2.1.1">
 </head>
 <body>
 <noscript><p style="padding:20px;color:#f0a3a8">This dashboard needs JavaScript.</p></noscript>
@@ -69,7 +69,8 @@ window.addEventListener('error', function (e) {
       <div class="filter-row">
         <div class="sport-tabs" id="sport-tabs"></div>
         <div class="search-box"><input id="search" type="search" placeholder="Search a team or game…" autocomplete="off" aria-label="Search teams or games"><div class="suggest" id="suggest" hidden></div></div>
-        <div class="slider-box"><label for="min-liq">MIN LIQUIDITY</label><b id="min-liq-val">$100K</b><input id="min-liq" type="range" min="0" max="1000000" step="10000" value="100000"></div>
+        <button type="button" class="help-btn" id="help-btn" aria-haspopup="dialog">? How to read</button>
+        <div class="slider-box"><label for="min-liq">MIN LIQUIDITY</label><b id="min-liq-val">$100K</b><button type="button" class="step-btn" id="liq-minus" aria-label="Lower minimum liquidity">&minus;</button><input id="min-liq" type="range" min="0" max="1000000" step="10000" value="100000"><button type="button" class="step-btn" id="liq-plus" aria-label="Raise minimum liquidity">+</button></div>
       </div>
       <div class="metric-grid" id="metrics"></div>
 
@@ -89,6 +90,7 @@ window.addEventListener('error', function (e) {
 
     <!-- PLAYS -->
     <section id="view-plays" class="view">
+      <div class="panel rules-panel" id="plays-rules"></div>
       <div class="section-heading"><div><h2>Suggested plays tracker</h2><p>Save a play from the dashboard, record the result, and watch your record and ROI.</p></div><span class="result-count" id="tracked-count"></span></div>
       <div class="metric-grid" id="play-stats"></div>
       <div class="panel add-play"><h3>Add a play manually</h3>
@@ -166,10 +168,44 @@ window.addEventListener('error', function (e) {
       </div>
     </section>
 
-    <footer>SHARPEDGE · SHARP MONEY TOOL v2.0 <span id="foot-note"></span></footer>
+
+    <footer>SHARPEDGE · SHARP MONEY TOOL v2.2.3 <span id="foot-note"></span></footer>
   </main>
 </div>
 <div class="toast" id="toast" hidden></div>
-<script src="/static/app.js?v=2.0.1"></script>
+<div class="hmodal" id="help-modal" role="dialog" aria-modal="true" aria-labelledby="help-title" hidden>
+      <div class="hmodal-card">
+        <button class="hmodal-x" id="help-close" type="button" aria-label="Close">&times;</button>
+        <h2 id="help-title">How to read a card</h2>
+        <p class="modal-sub">Each row is one game. Here is a sample, with every part explained.</p>
+        <div class="howto-card">
+          <div class="howto-row">
+            <div class="howto-cell"><span class="callout">1</span><div class="event-name"><span class="sport-chip">NBA</span>PHI @ ORL</div><div class="event-meta">Tonight 7:10 PM</div></div>
+            <div class="howto-cell"><span class="callout">2</span><span class="mkt-tag">Moneyline</span><div class="team-big">PHI</div><div class="split-cell"><b>74%</b> of $189K</div><div class="lean-bar"><span style="width:74%"></span></div></div>
+            <div class="howto-cell"><span class="callout">3</span><div class="ex-list"><span class="ex-chip"><b class="mini">K</b>$126K<small>/ $41K</small></span><span class="ex-chip"><b class="mini n">N</b>$14K<small>/ $8K</small></span></div></div>
+            <div class="howto-cell"><span class="callout">4</span><b>87%</b> <small class="muted-cell">bets</small> &middot; <b>91%</b> <small class="muted-cell">handle</small></div>
+            <div class="howto-cell"><span class="callout">5</span><span class="positive">+2.3%</span> <small class="muted-cell">PHI Kalshi</small></div>
+            <div class="howto-cell"><span class="callout">6</span><span class="signal-pill">HEAVY SHARP</span> <span class="signal-pill amber">FADE PUBLIC</span></div>
+          </div>
+        </div>
+        <ol class="howto-list">
+          <li><b>Game</b> &mdash; the matchup, league and start time (your local time).</li>
+          <li><b>Sharp side</b> &mdash; which <i>market</i> the sharp money is in (<span class="mkt-tag">Moneyline</span> <span class="mkt-tag spread">Spread</span> <span class="mkt-tag total">Total</span>), the side it is on (a team, a team with its spread like <i>SF +3.5</i>, or <i>Over 44.5</i>), and what share of that market's money it is. The Market board shows all three markets for each game with the dollars on each side.</li>
+          <li><b>Exchange money</b> &mdash; dollars on each exchange: <i>the sharp side</i> / the other side. K = Kalshi, N = Novig, PX = ProphetX.</li>
+          <li><b>Public on this side</b> &mdash; (moneyline only for now) the share of DraftKings <i>bets</i> (tickets) and <i>handle</i> (dollars) on the same team. A low number means the public is on the other side.</li>
+          <li><b>Best EV</b> &mdash; the best price compared with Pinnacle's fair price. Green and positive means a better price than fair.</li>
+          <li><b>Flags</b> &mdash; quick signals, explained below.</li>
+        </ol>
+        <div class="howto-flags">
+          <div><span class="signal-pill">HEAVY SHARP</span><span>most of the exchange money is on one team</span></div>
+          <div><span class="signal-pill blue">BIG MONEY</span><span>a lot of money in the market in total</span></div>
+          <div><span class="signal-pill amber">FADE PUBLIC</span><span>sharp money and the public are on opposite sides</span></div>
+          <div><span class="signal-pill">+EV</span><span>a price better than Pinnacle's fair price</span></div>
+          <div><span class="signal-pill blue">MODEL AGREES</span><span>our model picks the same team as the sharp money</span></div>
+        </div>
+        <p class="modal-note">Tip: use the &minus; / + buttons by <b>Min liquidity</b> to hide small markets. This is information, not betting advice.</p>
+      </div>
+    </div>
+<script src="/static/app.js?v=2.2.0"></script>
 </body>
 </html>

@@ -1,0 +1,2 @@
+# Render looks for requirements.txt at the repo/project root; the real list lives in backend/
+-r backend/requirements.txt

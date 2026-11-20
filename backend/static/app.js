@@ -86,6 +86,20 @@ function whenLabel(iso) {
   const t = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   return today ? t : d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + t;
 }
+const SLUG_X = { nba: { GSW: 'gs', NOP: 'no', NYK: 'ny', SAS: 'sa', UTA: 'utah', WAS: 'wsh' }, nfl: { WAS: 'wsh' },
+  nhl: { LAK: 'la', NJD: 'nj', SJS: 'sj', TBL: 'tb', UTA: 'utah' }, mlb: { CHW: 'chw', ATH: 'oak', SDP: 'sd', SFG: 'sf', TBR: 'tb', KCR: 'kc' } };
+const LEAGUE_SLUG = { nba: 'nba', nfl: 'nfl', nhl: 'nhl', mlb: 'mlb', ncaaf: 'college-football', ncaab: 'mens-college-basketball' };
+const fill = (tpl, o) => tpl.replace(/\{(\w+)\}/g, (_, x) => o[x] || '');
+function tl(v, team) {   // team logo (pro leagues; colleges fall back to just the name)
+  const L = state.data && state.data.logos; if (!L || !L.team || !SLUG_X[v.sport]) return '';
+  const slug = SLUG_X[v.sport][team] || String(team).toLowerCase();
+  return `<img class="tlogo" loading="lazy" alt="" src="${esc(fill(L.team, { sport: v.sport, slug }))}" onerror="this.remove()">`;
+}
+function chip(v) {
+  const L = state.data && state.data.logos;
+  const img = L && L.league ? `<img class="llogo" alt="" src="${esc(fill(L.league, { slug: LEAGUE_SLUG[v.sport] }))}" onerror="this.remove()">` : '';
+  return `<span class="sport-chip">${img}${esc(v.label)}</span>`;
+}
 const nm = (v, team) => (team === v.away ? v.away_name : team === v.home ? v.home_name : team);
 const other = (v, team) => (team === v.away ? v.home : v.away);
 function flagPills(v) {
@@ -100,7 +114,20 @@ function flagPills(v) {
   if (v.model_status === 'disagrees') out.push(`<span class="signal-pill red">MODEL DIFFERS</span>`);
   return `<div class="flags">${out.join('') || '<span class="muted-cell">—</span>'}</div>`;
 }
-const gameCell = (v) => `<div class="event-name"><span class="sport-chip">${esc(v.label)}</span>${esc(v.away_name)} @ ${esc(v.home_name)}</div><div class="event-meta">${esc(whenLabel(v.start))}</div>`;
+const gameCell = (v) => `<div class="event-name">${chip(v)}<span class="tm">${tl(v, v.away)}${esc(v.away_name)}</span> @ <span class="tm">${tl(v, v.home)}${esc(v.home_name)}</span></div><div class="event-meta">${esc(whenLabel(v.start))}</div>`;
+const MKT = { moneyline: 'Moneyline', spread: 'Spread', total: 'Total' };
+const sideName = (v, mk, side) => (mk.type === 'total' ? (side === 'OVER' ? 'Over' : 'Under') + ' ' + mk.line : mk.type === 'spread' ? nm(v, side) + ' ' + ((side === v.home ? mk.line : -mk.line) > 0 ? '+' : '') + (side === v.home ? mk.line : -mk.line) : nm(v, side));
+const sideLogo = (v, mk, side) => (mk.type === 'total' ? '' : tl(v, side));
+const mktTag = (mk) => `<span class="mkt-tag ${mk.type}">${MKT[mk.type]}</span>`;
+function marketRows(v) {   // Moneyline / Spread / Total, $ on each side and the split per exchange
+  return (v.markets || []).map((mk) => {
+    const [s0, s1] = mk.sides;
+    const per = Object.entries(mk.liquidity).map(([bk, l]) => `<span class="ex-chip">${badge(bk)}${k(l[s0] || 0)}<small>/ ${k(l[s1] || 0)}</small></span>`).join('');
+    return `<div class="mkt-row${mk.heavy ? ' heavy' : ''}"><div class="mkt-head">${mktTag(mk)}<b>${sideLogo(v, mk, mk.side)}${esc(sideName(v, mk, mk.side))}</b><span class="mkt-pct">${mk.side_pct}% of ${k(mk.total)}</span></div>
+      <div class="mkt-split"><span>${sideLogo(v, mk, s0)}${esc(sideName(v, mk, s0))} <b>${k(mk.totals[s0] || 0)}</b></span><div class="source-bar split"><span style="width:${mk.pct[s0]}%"></span></div><span><b>${k(mk.totals[s1] || 0)}</b> ${sideLogo(v, mk, s1)}${esc(sideName(v, mk, s1))}</span></div>
+      <div class="ex-list">${per}</div></div>`;
+  }).join('');
+}
 const register = (v) => { const id = v.sport + '|' + v.key; state.byId.set(id, v); return id; };
 
 /* ---------- overview ---------- */
@@ -115,6 +142,7 @@ function labelTables() {
 }
 function renderOverview() {
   const d = state.data; if (!d) return;
+  paintRules();
   const topPlays = d.top_plays.filter(matches), discs = d.discrepancies.filter(matches);
   state.byId.clear();
   const m = d.metrics;
@@ -126,24 +154,26 @@ function renderOverview() {
 
   $('top-count').textContent = `${topPlays.length} PLAYS`;
   $('top-rows').innerHTML = topPlays.length ? topPlays.map((v) => {
-    const side = v.sharp_side, id = register(v), p = v.public.bets[side], h = v.public.handle[side];
-    const ex = Object.entries(v.liquidity).map(([bk, l]) => `<span class="ex-chip">${badge(bk)}${k(l[side] || 0)}<small>/ ${k(l[other(v, side)] || 0)}</small></span>`).join('');
+    const mk = v.top_market || { type: 'moneyline', side: v.sharp_side, side_pct: v.sharp_pct, total: v.total, liquidity: v.liquidity, sides: [v.away, v.home] };
+    const isML = mk.type === 'moneyline', side = isML ? v.sharp_side : mk.side, id = register(v), p = isML ? v.public.bets[side] : null, h = isML ? v.public.handle[side] : null;
+    const opp = mk.sides[0] === mk.side ? mk.sides[1] : mk.sides[0];
+    const ex = Object.entries(mk.liquidity).map(([bk, l]) => `<span class="ex-chip">${badge(bk)}${k(l[mk.side] || 0)}<small>/ ${k(l[opp] || 0)}</small></span>`).join('');
     const ev = v.best_ev ? `<span class="${v.best_ev.ev_pct >= d.thresholds.min_ev_pct ? 'positive' : 'neutral'}">${v.best_ev.ev_pct > 0 ? '+' : ''}${v.best_ev.ev_pct}%</span> <small class="muted-cell">${esc(nm(v, v.best_ev.team))} ${esc(BOOKS[v.best_ev.book] || v.best_ev.book)}</small>` : '<span class="muted-cell">—</span>';
     const model = v.model_status === 'agrees' ? '<span class="signal-pill blue">AGREES</span>' : v.model_status === 'disagrees' ? '<span class="signal-pill red">DIFFERS</span>' : '<span class="muted-cell">—</span>';
     return `<tr><td>${gameCell(v)}</td>
-      <td><div class="team-big">${esc(nm(v, side))}</div><div class="split-cell"><b>${v.sharp_pct}%</b> of ${k(v.total)}</div><div class="lean-bar"><span style="width:${v.sharp_pct}%"></span></div></td>
+      <td>${mktTag(mk)}<div class="team-big">${sideLogo(v, mk, mk.side)}${esc(sideName(v, mk, mk.side))}</div><div class="split-cell"><b>${mk.side_pct}%</b> of ${k(mk.total)}</div><div class="lean-bar"><span style="width:${mk.side_pct}%"></span></div></td>
       <td><div class="ex-list">${ex}</div></td>
       <td class="amount">${p == null ? '<span class="muted-cell">—</span>' : `${pct(p)} <small class="muted-cell">bets</small> · ${pct(h)} <small class="muted-cell">handle</small>`}</td>
-      <td>${model}</td><td>${ev}</td><td>${flagPills(v)}</td>
-      <td><button class="action-btn" data-track="${esc(id)}">+ Track</button></td></tr>`;
+      <td>${isML ? model : '<span class="muted-cell">—</span>'}</td><td>${isML ? ev : '<span class="muted-cell">—</span>'}</td><td>${flagPills(v)}</td>
+      <td>${isML ? `<button class="action-btn" data-track="${esc(id)}">+ Track</button>` : '<span class="muted-cell">ML only</span>'}</td></tr>`;
   }).join('') : `<tr class="empty-row"><td colspan="8">No heavy sharp plays above ${k(state.minLiq)} right now. Lower the minimum with the slider.</td></tr>`;
 
   $('disc-count').textContent = `${discs.length} GAMES`;
   $('disc-rows').innerHTML = discs.length ? discs.map((v) => {
     const side = v.sharp_side, ps = v.public_side, id = register(v);
     return `<tr><td>${gameCell(v)}</td>
-      <td><div class="team-big">${esc(nm(v, side))}</div><div class="split-cell"><b>${v.sharp_pct}%</b> of exchange money</div><div class="lean-bar"><span style="width:${v.sharp_pct}%"></span></div></td>
-      <td><div class="team-big">${esc(nm(v, ps))}</div><div class="split-cell"><b>${pct(v.public.bets[ps])}</b> bets · <b>${pct(v.public.handle[ps])}</b> handle</div><div class="lean-bar pub"><span style="width:${v.public.bets[ps] || 0}%"></span></div></td>
+      <td><div class="team-big">${tl(v, side)}${esc(nm(v, side))}</div><div class="split-cell"><b>${v.sharp_pct}%</b> of exchange money</div><div class="lean-bar"><span style="width:${v.sharp_pct}%"></span></div></td>
+      <td><div class="team-big">${tl(v, ps)}${esc(nm(v, ps))}</div><div class="split-cell"><b>${pct(v.public.bets[ps])}</b> bets · <b>${pct(v.public.handle[ps])}</b> handle</div><div class="lean-bar pub"><span style="width:${v.public.bets[ps] || 0}%"></span></div></td>
       <td class="amount">${k(v.total)}</td><td>${flagPills(v)}</td>
       <td><button class="action-btn" data-track="${esc(id)}">+ Track sharp side</button></td></tr>`;
   }).join('') : `<tr class="empty-row"><td colspan="6">No game above ${k(state.minLiq)} has both exchange money and DraftKings public splits yet. Lower the minimum liquidity, or check back closer to game time.</td></tr>`;
@@ -169,8 +199,8 @@ function renderBoard() {
     if (v.model) chips.push(`<span class="signal-pill blue">MODEL ${esc(nm(v, v.model.pick))}${v.model.prob ? ' ' + Math.round(v.model.prob * 100) + '%' : ''}</span>`);
     if (v.ev.available) chips.push(`<span class="signal-pill ${v.best_ev && v.best_ev.ev_pct >= d.thresholds.min_ev_pct ? '' : 'dim'}">PINNACLE FAIR ${esc(nm(v, a))} ${v.ev.pinnacle[a].fair_prob}% (${american(v.ev.pinnacle[a].decimal)})</span>`);
     if (v.best_ev) chips.push(`<span class="signal-pill ${v.best_ev.ev_pct >= d.thresholds.min_ev_pct ? '' : 'dim'}">BEST EV ${v.best_ev.ev_pct > 0 ? '+' : ''}${v.best_ev.ev_pct}% ${esc(nm(v, v.best_ev.team))} @ ${esc(BOOKS[v.best_ev.book] || v.best_ev.book)} ${american(v.best_ev.decimal)}</span>`);
-    return `<article class="market-card"><div class="market-card-head"><div><h3><span class="sport-chip">${esc(v.label)}</span>${esc(v.away_name)} @ ${esc(v.home_name)}</h3><p>${esc(whenLabel(v.start))} · ${k(v.total)} total · ${v.lean[a]}% ${esc(v.away_name)} / ${v.lean[h]}% ${esc(v.home_name)}</p></div><div>${flagPills(v)}</div></div>
-      <div class="legend"><span><i class="dot"></i>${esc(v.away_name)}</span><span><i class="dot b"></i>${esc(v.home_name)}</span></div>${rows}
+    return `<article class="market-card"><div class="market-card-head"><div><h3>${chip(v)}<span class="tm">${tl(v, a)}${esc(v.away_name)}</span> @ <span class="tm">${tl(v, h)}${esc(v.home_name)}</span></h3><p>${esc(whenLabel(v.start))} · ${k(v.total)} total · ${v.lean[a]}% ${esc(v.away_name)} / ${v.lean[h]}% ${esc(v.home_name)}</p></div><div>${flagPills(v)}</div></div>
+      ${(v.markets || []).length ? marketRows(v) : `<div class="legend"><span><i class="dot"></i>${tl(v, a)}${esc(v.away_name)}</span><span><i class="dot b"></i>${tl(v, h)}${esc(v.home_name)}</span></div>${rows}`}
       <div class="market-bottom">${chips.join('')}</div>
       ${v.sharp_side ? `<div class="card-actions"><button class="action-btn" data-track="${esc(id)}">+ Track ${esc(nm(v, v.sharp_side))}</button></div>` : ''}</article>`;
   }).join('') : '<div class="panel empty-state">No games above the minimum. Lower the slider on the Overview page.</div>';
@@ -464,6 +494,37 @@ function typeahead(inputId, boxId, onPick) {
 typeahead('play-desc', 'play-suggest', () => {});
 typeahead('play-search', 'play-search-suggest', () => { if (state.plays) renderPlays(state.plays); });
 $('play-search').addEventListener('input', () => { if (state.plays) renderPlays(state.plays); });
+
+/* ---------- min-liquidity  - / +  buttons ---------- */
+for (const [id, dir] of [['liq-minus', -1], ['liq-plus', 1]]) {
+  $(id).addEventListener('click', () => {
+    const r = $('min-liq'); r.value = Math.max(0, Math.min(+r.max, +r.value + dir * 50000));
+    r.dispatchEvent(new Event('input'));
+  });
+}
+
+/* ---------- How to read popup ---------- */
+function openHelp(on) { $('help-modal').hidden = !on; document.body.classList.toggle('modal-open', on); if (on) $('help-close').focus(); }
+$('help-btn').addEventListener('click', () => openHelp(true));
+$('help-close').addEventListener('click', () => openHelp(false));
+$('help-modal').addEventListener('click', (e) => { if (e.target.id === 'help-modal') openHelp(false); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('help-modal').hidden) openHelp(false); });
+
+/* ---------- rules panel on the Suggested plays page ---------- */
+function paintRules() {
+  const t = (state.data && state.data.thresholds) || {};
+  const el = $('plays-rules'); if (!el || !t.heavy_sharp_pct) return;
+  el.innerHTML = `<h3>What makes a suggested play</h3>
+    <ul>
+      <li><b>Heavy sharp</b> &mdash; ${t.heavy_sharp_pct}%+ of the exchange money (Kalshi, Novig, ProphetX) is on one side of a market: the moneyline, the spread or the total.</li>
+      <li><b>Fade the public</b> &mdash; the sharp side has 55%+ of the money while ${t.fade_public_pct}%+ of DraftKings public bets are on the other side.</li>
+      <li><b>+EV</b> &mdash; a book or exchange price beats the de-vigged Pinnacle price by ${t.min_ev_pct}%+ (edges above ${t.max_ev_pct}% are ignored as stale or bad prices).</li>
+      <li><b>Model agrees</b> &mdash; the sharp side is also the team our model picks.</li>
+      <li><b>Minimum size</b> &mdash; only games above your <i>min liquidity</i> slider are shown; big money starts at ${k(t.big_money)}.</li>
+    </ul>
+    <p><b>Nightly log:</b> before tip-off the tool logs every heavy-sharp play with at least ${k(t.nightly_min_total)} on the exchanges, one flat ${money(t.nightly_unit, 0)} unit each, at the best non-Pinnacle price (or Pinnacle, or -110 if no odds feed). Games that already started are never logged, and plays are graded from the final scores.</p>
+    <p><b>Stake size:</b> your unit from the Profile page, or quarter-Kelly capped at 5% of your bankroll when you enter one.</p>`;
+}
 
 /* ---------- boot ---------- */
 $('date-chip').textContent = new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });

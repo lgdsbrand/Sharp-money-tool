@@ -23,7 +23,8 @@ async def _try(label: str, coro):
     except (prophetx.NeedsSetup, novig.NeedsSetup) as e:
         print(f"  [SETUP] {label}: {e}")
     except Exception as e:
-        print(f"  [FAIL]  {label}: {type(e).__name__}: {e}")
+        from .pipeline import scrub
+        print(f"  [FAIL]  {label}: {scrub(str(type(e).__name__ + ": " + str(e)))}")
     return []
 
 
@@ -167,6 +168,25 @@ async def main() -> int:
     else:
         print("  [OFF]   prophetx (PROPHETX_ENABLED=false)")
     await _try("polymarket", polymarket.fetch(settings.SPORTS[0])) if settings.POLYMARKET_ENABLED else print("  [OFF]   polymarket (optional)")
+    print("\n-- Spread / Total markets (new in v2.2)")
+    for name, mod, on in (("kalshi", kalshi, settings.KALSHI_ENABLED), ("novig", novig, settings.NOVIG_ENABLED),
+                          ("prophetx", prophetx, settings.PROPHETX_ENABLED and bool(settings.PROPHETX_AFFILIATE_KEY))):
+        if not on:
+            print(f"  [OFF]   {name} spread/total")
+            continue
+        for sp in settings.SPORTS:
+            try:
+                res = await asyncio.wait_for(mod.fetch_alts(sp), 90)
+            except Exception as e:
+                print(f"  [FAIL]  {name} {sp} spread/total: {type(e).__name__}: {str(e)[:150]}")
+                continue
+            st = getattr(mod, "last_alt_stats", {}).get(sp, {})
+            kinds = {t: sum(1 for r in res if r["mtype"] == t) for t in ("spread", "total")}
+            print(f"  [OK]    {name} {sp}: {kinds}  detail={ {k: v for k, v in st.items() if k != 'sample'} }")
+            if res:
+                print(f"          sample: {str(res[0])[:300]}")
+            if st.get("sample"):
+                print(f"          raw sample: {str(st['sample'])[:500]}")
     print("\nCopy everything above into a message if something shows FAIL and I'll fix that adapter.")
     return 0
 

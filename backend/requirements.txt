@@ -1,3 +1,4 @@
+# Version ranges (not pins) so pip can pick wheels that exist for your Python version.
 fastapi>=0.115,<1
 uvicorn>=0.34,<1
 httpx>=0.27,<1
@@ -5,3 +6,4 @@ python-dotenv>=1.0,<2
 beautifulsoup4>=4.12,<5
 tzdata
 pytest>=8,<9
+# Add `cryptography` here only when you implement Novig request signing (app/sources/novig.py).

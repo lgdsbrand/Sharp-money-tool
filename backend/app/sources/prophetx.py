@@ -161,3 +161,85 @@ async def fetch(sport: str, client: httpx.AsyncClient | None = None) -> list[dic
     finally:
         if own:
             await client.aclose()
+
+
+last_alt_stats: dict = {}
+
+
+async def fetch_alts(sport: str, client: httpx.AsyncClient | None = None) -> list[dict]:
+    """Spread and total markets from the Market Data API. Selections carry a `strike` (spread: that side's
+    handicap; total: the points line). Records are bucketed per line so the pipeline can merge them across books.
+    Field use is read from the docs but unverified on live data - see `python -m app.diagnose`."""
+    if not settings.PROPHETX_AFFILIATE_KEY:
+        raise NeedsSetup("PROPHETX_AFFILIATE_KEY is empty - put the ProphetX Market Data key in .env")
+    own = client is None
+    client = client or httpx.AsyncClient(timeout=20, headers={"User-Agent": "sharp-money-tool/2.2"}, follow_redirects=True)
+    st = last_alt_stats[sport] = {"events": 0, "markets": 0, "kept": 0, "sample": None}
+    try:
+        events: dict[int, dict] = {}
+        for tid in await _tournament_ids(client, sport):
+            data = await _get(client, "/affiliate/get_sport_events", {"tournament_id": tid})
+            for e in data.get("sport_events", []):
+                if str(e.get("status", "")).lower() in _NOT_STARTED and len(e.get("competitors", [])) == 2:
+                    events[e["event_id"]] = e
+        st["events"] = len(events)
+        ids = list(events)
+        mkts: list[dict] = []
+        for i in range(0, len(ids), 50):
+            data = await _get(client, "/v4/affiliate/get_multiple_markets",
+                              [("event_ids", str(x)) for x in ids[i:i + 50]] + [("market_types", "spread"), ("market_types", "total")])
+            mkts += _flatten(data)
+        st["markets"] = len(mkts)
+        buckets: dict = {}
+        for m in mkts:
+            kind = str(m.get("type") or m.get("sub_type") or m.get("name") or "").lower()
+            mtype = "spread" if "spread" in kind else "total" if "total" in kind else None
+            ev = events.get(m.get("event_id"))
+            if not mtype or not ev:
+                continue
+            by_side = {c.get("side"): c for c in ev["competitors"]}
+            away, home = by_side.get("away"), by_side.get("home")
+            if not away or not home or not all(is_known(c["name"], sport) for c in (away, home)):
+                continue
+            a, h = norm_team(away["name"], sport), norm_team(home["name"], sport)
+            comps = {c["id"]: c for c in ev["competitors"]}
+            for group in m.get("selections", []):
+                for s in (group if isinstance(group, list) else [group]):
+                    try:
+                        strike, qty = float(s.get("strike")), _qty_dollars(float(s.get("quantity") or 0), float(s.get("price") or 0))
+                    except (TypeError, ValueError):
+                        continue
+                    if st["sample"] is None:
+                        st["sample"] = {"type": kind, "selection": s}
+                    if mtype == "total":
+                        nm = str(s.get("name", "")).lower()
+                        key = "OVER" if nm.startswith("over") else "UNDER" if nm.startswith("under") else None
+                        if not key:
+                            continue
+                        line = abs(strike)
+                        b = buckets.setdefault(("total", ev["event_id"], line), {"a": a, "h": h, "ev": ev, "liq": {}, "line": line})
+                    else:
+                        comp = comps.get(s.get("competitor_id"))
+                        if not comp:
+                            continue
+                        key = norm_team(comp["name"], sport)
+                        home_line = strike if key == h else -strike
+                        b = buckets.setdefault(("spread", ev["event_id"], home_line), {"a": a, "h": h, "ev": ev, "liq": {}, "home_line": home_line})
+                    b["liq"][key] = b["liq"].get(key, 0) + qty
+        out = []
+        for (mtype, _eid, _line), b in buckets.items():
+            start = None
+            if b["ev"].get("scheduled"):
+                try:
+                    start = datetime.fromisoformat(b["ev"]["scheduled"].replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
+                except ValueError:
+                    pass
+            rec = {"book": "prophetx", "away": b["a"], "home": b["h"], "start": start, "mtype": mtype,
+                   "liquidity": {k: round(v) for k, v in b["liq"].items()}}
+            rec.update({"line": b["line"]} if mtype == "total" else {"home_line": b["home_line"]})
+            out.append(rec)
+        st["kept"] = len(out)
+        return out
+    finally:
+        if own:
+            await client.aclose()

@@ -232,3 +232,113 @@ async def fetch(sport: str, client: httpx.AsyncClient | None = None) -> list[dic
     finally:
         if own:
             await client.aclose()
+
+
+_MAX_ALT_MARKETS = 110
+_ALT_BUDGET = 45.0
+_LINE_TAIL = re.compile(r"\s*[+-]\d+(?:\.\d+)?\s*$")
+last_alt_stats: dict = {}
+
+
+def _fnum(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+async def fetch_alts(sport: str, client: httpx.AsyncClient | None = None) -> list[dict]:
+    """Spread and total markets (the exchange's biggest lines first). A spread's `strike` is the HOME team's
+    handicap (per Novig's spec), so the record carries `home_line`; a total's strike is the points line.
+    Shape matches the other sources: {book, away, home, start, mtype, liquidity, home_line | line}."""
+    own = client is None
+    client = client or httpx.AsyncClient(timeout=20, headers={"User-Agent": "sharp-money-tool/2.2"})
+    st = last_alt_stats[sport] = {"markets": 0, "books": 0, "kept": 0, "types": [], "sample": [], "name_miss": 0}
+    try:
+        leagues = pick_leagues(sport, await _leagues(client))
+        if not leagues:
+            return []
+        base = {"league": ",".join(leagues), "marketType": "SPREAD,TOTAL", "limit": 500}
+        markets = await _paged(client, "/v3/public/catalog/markets", {**base, "eventStatus": "OPEN_PREGAME"}, limit_pages=4)
+        st["markets"] = len(markets)
+        st["types"] = sorted({str(m.get("marketType")) for m in markets})
+        markets = [m for m in markets if m.get("status") in ("OPEN", None) and len(m.get("outcomes", [])) == 2
+                   and _fnum(m.get("strike")) is not None]
+        # spread outcome names carry the line ("MEM -6.5"): strip it so team names can be recognised
+        for m in markets:
+            if not str(m.get("marketType", "")).upper().startswith("TOTAL"):
+                m["outcomes"] = [dict(o, name=_LINE_TAIL.sub("", str(o.get("name", "")))) for o in m["outcomes"]]
+        # keep the 2 busiest lines per game and market type, so every game gets its main line
+        markets.sort(key=lambda m: _fnum(m.get("openInterest")) or 0, reverse=True)
+        seen, picked = {}, []
+        for m in markets:
+            kk = (m.get("eventId"), str(m.get("marketType")))
+            if seen.get(kk, 0) < 2:
+                seen[kk] = seen.get(kk, 0) + 1
+                picked.append(m)
+        markets = picked[:_MAX_ALT_MARKETS]
+        if markets:
+            st["sample"] = [{"type": m.get("marketType"), "strike": m.get("strike"), "desc": m.get("description"),
+                             "outcomes": [o.get("name") for o in m["outcomes"]]} for m in markets[:3]]
+        ev_desc: dict = {}
+        if markets:   # event descriptions carry the team names (needed for totals)
+            try:
+                evs = await _paged(client, "/v3/public/catalog/events", {"league": ",".join(leagues), "status": "OPEN_PREGAME", "limit": 500})
+                ev_desc = {e["eventId"]: e.get("description") for e in evs}
+            except Exception:
+                pass
+        import time as _t
+        t0 = _t.monotonic()
+        out = []
+        for m in markets:
+            if _t.monotonic() - t0 > _ALT_BUDGET:
+                break
+            outs = m["outcomes"]
+            strike = _fnum(m.get("strike"))
+            is_total = str(m.get("marketType", "")).upper().startswith("TOTAL")
+            if is_total:
+                names = [str(o.get("name", "")).strip().upper() for o in outs]
+                if sorted(n.split()[0] if n else "" for n in names) != ["OVER", "UNDER"]:
+                    continue
+                keys = ["OVER" if n.startswith("OVER") else "UNDER" for n in names]
+                # the teams come from the event description ("Hawaii @ Nevada")
+                sides = _sides(ev_desc.get(m.get("eventId")) or m.get("description"))
+                if not sides:
+                    st["name_miss"] += 1
+                    continue
+                away, home = norm_team(sides[0], sport), norm_team(sides[1], sport)
+            else:
+                if sport in ("ncaaf", "ncaab"):
+                    names = _college_names(outs, ev_desc.get(m.get("eventId")) or m.get("description"))
+                    if not names:
+                        st["name_miss"] += 1
+                        continue
+                    keys = [norm_team(n, sport) for n in names]
+                else:
+                    if not all(is_known(o.get("name", ""), sport) for o in outs):
+                        st["name_miss"] += 1
+                        continue
+                    keys = [norm_team(o.get("name", ""), sport) for o in outs]
+                away, home = keys
+            try:
+                b = await _get(client, f"/v3/public/catalog/markets/{m['marketId']}/book", {"depth": 20})
+            except Exception as e:
+                if "429" in str(e):
+                    break
+                continue
+            st["books"] += 1
+            orders = b.get("orders", {})
+            liq = {k: round(dollars_on_outcome(orders.get(o["outcomeId"], []))) for k, o in zip(keys, outs)}
+            start = (datetime.fromtimestamp(m["startsTs"] / 1000, timezone.utc).isoformat() if m.get("startsTs") else None)
+            rec = {"book": "novig", "away": away, "home": home, "start": start,
+                   "mtype": "total" if is_total else "spread", "liquidity": liq}
+            if is_total:
+                rec["line"] = strike
+            else:
+                rec["home_line"] = strike
+            out.append(rec)
+        st["kept"] = len(out)
+        return out
+    finally:
+        if own:
+            await client.aclose()

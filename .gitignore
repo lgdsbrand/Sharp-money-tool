@@ -1,11 +1,11 @@
 .env
-.env.*
-!.env.example
 *.db
 __pycache__/
 .venv/
 venv/
 *.pem
 *.key
+
+diagnose_*.txt
+diagnose_*.json
 .pytest_cache/
-*.log

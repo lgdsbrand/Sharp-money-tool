@@ -88,6 +88,26 @@ def games(sport: str = "nba") -> list[dict]:
     return out
 
 
+def alts(g: dict) -> dict:
+    """Demo spread + total markets for one game (two lines each, so the 'main line' choice is exercised)."""
+    rng = random.Random(sum(map(ord, g["key"])))
+    a, h = g["away"], g["home"]
+    base = {"nba": 5.5, "nfl": 3.5, "nhl": 1.5, "mlb": 1.5, "ncaaf": 7.5, "ncaab": 6.5}.get(g["sport"], 3.5)
+    tot = {"nba": 224.5, "nfl": 44.5, "nhl": 6.5, "mlb": 8.5, "ncaaf": 55.5, "ncaab": 142.5}.get(g["sport"], 44.5)
+    out = {}
+    for mtype, lines in (("spread", [-base, -base - 1]), ("total", [tot, tot + 1])):
+        for j, line in enumerate(lines):
+            scale = 1.0 if j == 0 else 0.25
+            lean = rng.uniform(0.35, 0.85)
+            sides = (a, h) if mtype == "spread" else ("OVER", "UNDER")
+            liq = {}
+            for bk, mult in (("kalshi", 1.0), ("novig", 0.6), ("prophetx", 0.4)):
+                t = rng.randint(80_000, 700_000) * mult * scale
+                liq[bk] = {sides[0]: round(t * lean), sides[1]: round(t * (1 - lean))}
+            out[f"{mtype}:{line:g}"] = {"mtype": mtype, "line": line, "liquidity": liq}
+    return out
+
+
 def model_picks(sport: str = "nba") -> list[dict]:
     return [{"away": norm_team(a, sport), "home": norm_team(h, sport), "pick": norm_team(p, sport), "prob": pr}
             for a, h, p, pr in _PICKS.get(sport, [])]

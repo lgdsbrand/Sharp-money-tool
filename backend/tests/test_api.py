@@ -83,7 +83,7 @@ def test_sports_filter_and_sections():
         assert {g["label"] for g in allg["games"]} == {"NBA", "NFL", "NHL", "MLB", "NCAAF", "NCAAB"}
         nfl = c.get("/api/sharp", params={"sport": "nfl", "min_liquidity": 0}).json()
         assert nfl["games"] and all(g["sport"] == "nfl" for g in nfl["games"])
-        assert allg["top_plays"] and all(any(f["type"] in ("heavy_sharp", "big_money") for f in g["flags"]) for g in allg["top_plays"])
+        assert allg["top_plays"] and all(g["heavy_market"] or any(f["type"] in ("heavy_sharp", "big_money") for f in g["flags"]) for g in allg["top_plays"])
         assert allg["discrepancies"] and all(g["conflict"] or any(f["type"] == "fade" for f in g["flags"]) for g in allg["discrepancies"])
         assert c.get("/api/sharp", params={"sport": "curling"}).status_code == 422
 
