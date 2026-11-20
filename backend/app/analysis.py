@@ -234,7 +234,7 @@ def build_game_view(raw: dict, min_liquidity: float, bankroll: float = 0.0, kell
         "public": {"bets": public_bets, "handle": public_handle}, "public_side": public_side, "conflict": conflict,
         "flags": flags, "model": model, "model_status": model_status,
         "ev": ev, "best_ev": best_ev,
-        "visible": lean["total"] >= min_liquidity,
+        "visible": lean["total"] >= min_liquidity or any(m["total"] >= min_liquidity for m in markets),
     }
 
     # suggested play: first flagged side we can price
@@ -242,6 +242,21 @@ def build_game_view(raw: dict, min_liquidity: float, bankroll: float = 0.0, kell
     if suggestion:
         view["suggestion"] = suggestion
     return view
+
+
+def top_play_rows(views: list[dict], min_liquidity: float, limit: int = 25) -> list[dict]:
+    """One row per qualifying market, so a game can show its moneyline, spread and total separately.
+    A market qualifies when one side holds HEAVY_SHARP_PCT+ of its exchange money and the market's total is at
+    least `min_liquidity`. A game with a heavy-sharp / big-money flag but no qualifying market keeps its moneyline row.
+    Each row is the game view with `top_market` set to that market. Biggest dollars first."""
+    rows = []
+    for v in views:
+        ms = [m for m in v.get("markets", []) if m["heavy"] and m["total"] >= min_liquidity]
+        if not ms and any(f["type"] in ("heavy_sharp", "big_money") for f in v["flags"]):
+            ms = [next((m for m in v.get("markets", []) if m["type"] == "moneyline"), None)]
+        rows += [dict(v, top_market=m) for m in ms]
+    rows.sort(key=lambda r: (r["top_market"] or {}).get("total", r["total"]), reverse=True)
+    return rows[:limit]
 
 
 def suggest_play(view: dict, raw: dict, bankroll: float, kelly_fraction: float) -> Optional[dict]:

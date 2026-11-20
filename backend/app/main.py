@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from . import auth, pipeline
 from .pipeline import scrub
-from .analysis import american_to_decimal, build_game_view, kelly_stake
+from .analysis import american_to_decimal, build_game_view, kelly_stake, top_play_rows
 from .config import settings
 from .sources import odds_api
 from .store import grade, make_store, nightly_groups, play_stats
@@ -198,7 +198,7 @@ async def sharp(
     visible = sorted((v for v in views if v["visible"]), key=lambda v: v["total"], reverse=True)
 
     has = lambda v, *types: any(f["type"] in types for f in v["flags"])  # noqa: E731
-    top_plays = [v for v in visible if has(v, "heavy_sharp", "big_money") or v.get("heavy_market")][:15]
+    top_plays = top_play_rows(visible, min_liquidity)  # one row per heavy market: moneyline, spread and total
     discrepancies = sorted((v for v in visible if v["conflict"] or has(v, "fade")),
                            key=lambda v: (not has(v, "fade"), -v["total"]))[:15]
     return {
