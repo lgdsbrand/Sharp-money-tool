@@ -31,12 +31,12 @@ class SqliteStore:
             c.execute(
                 "create table if not exists plays(id text primary key, created_at text, sport text, game_key text,"
                 " description text, team text, book text, odds_decimal real, stake real, status text, pnl real,"
-                " source text, notes text, day text, log_key text, user_id text)"
+                " source text, notes text, day text, log_key text, user_id text, market text, line real)"
             )
             have = {r[1] for r in c.execute("pragma table_info(plays)")}
-            for col in ("day", "log_key", "user_id"):  # upgrade older local databases
-                if col not in have:
-                    c.execute(f"alter table plays add column {col} text")
+            for col, typ in (("day", "text"), ("log_key", "text"), ("user_id", "text"), ("market", "text"), ("line", "real")):
+                if col not in have:  # upgrade older local databases
+                    c.execute(f"alter table plays add column {col} {typ}")
 
     def _c(self):
         c = sqlite3.connect(self.path)
@@ -141,6 +141,11 @@ def grade(play: dict, won: Optional[bool]) -> dict:
     if won is None:
         return {"status": "push", "pnl": 0.0}
     return {"status": "won", "pnl": round(stake * (dec - 1), 2)} if won else {"status": "lost", "pnl": round(-stake, 2)}
+
+
+def market_stats(plays: list[dict]) -> dict:
+    """All-time record per market type; plays logged before spreads/totals existed count as moneylines."""
+    return {m: play_stats([p for p in plays if (p.get("market") or "moneyline") == m]) for m in ("moneyline", "spread", "total")}
 
 
 def play_stats(plays: list[dict]) -> dict:

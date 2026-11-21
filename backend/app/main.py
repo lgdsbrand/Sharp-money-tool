@@ -15,11 +15,12 @@ import mimetypes
 from pydantic import BaseModel
 
 from . import auth, pipeline
-from .pipeline import scrub
+from datetime import timedelta
+from .pipeline import scrub, slate_day
 from .analysis import american_to_decimal, build_game_view, kelly_stake, top_play_rows
 from .config import settings
 from .sources import odds_api
-from .store import grade, make_store, nightly_groups, play_stats
+from .store import grade, make_store, market_stats, nightly_groups, play_stats
 from .teams import ALL_SPORTS, SPORT_LABELS, display
 
 # Windows can map .js to text/plain in the registry, which some browsers refuse to run.
@@ -99,12 +100,13 @@ class Creds(BaseModel):
     email: str
     password: str
     name: str = ""
+    remember: bool = True
 
 
 @app.post("/api/auth/signup")
 async def signup(c: Creds):
     try:
-        user, token = await auth.signup(store, c.email, c.password, c.name)
+        user, token = await auth.signup(store, c.email, c.password, c.name, c.remember)
     except auth.AuthError as e:
         raise HTTPException(e.status, str(e))
     return {"user": user, "token": token}
@@ -113,7 +115,7 @@ async def signup(c: Creds):
 @app.post("/api/auth/login")
 async def login(c: Creds, request: Request):
     try:
-        user, token = await auth.login(store, c.email, c.password, request.client.host if request.client else "")
+        user, token = await auth.login(store, c.email, c.password, request.client.host if request.client else "", c.remember)
     except auth.AuthError as e:
         raise HTTPException(e.status, str(e))
     return {"user": user, "token": token}
@@ -322,7 +324,10 @@ async def plays(user: Optional[dict] = Depends(need_user)):
 async def nightly(days: int = Query(default=14, ge=1, le=90), _user: Optional[dict] = Depends(need_user)):
     rows = [p for p in await store.plays_list() if p.get("log_key")]
     groups = nightly_groups(rows)
-    return {"days": groups[:days], "overall": play_stats(rows), "unit": settings.NIGHTLY_UNIT,
+    today = slate_day(None)
+    yesterday = (datetime.fromisoformat(today) - timedelta(days=1)).date().isoformat()
+    groups = [g for g in groups if g["day"] in (today, yesterday)]
+    return {"days": groups[:days], "overall": play_stats(rows), "markets": market_stats(rows), "unit": settings.NIGHTLY_UNIT,
             "demo": any(p.get("source") == "demo" for p in rows)}
 
 

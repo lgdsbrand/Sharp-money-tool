@@ -234,3 +234,11 @@ body.modal-open{overflow:hidden}
 .mkt-split .source-bar{min-width:60px}
 .mkt-row.heavy .mkt-head b{color:#17724a}
 @media(max-width:600px){.mkt-split{grid-template-columns:1fr;gap:4px}}
+
+/* v2.3 */
+.remember{display:flex;align-items:center;gap:8px;flex-direction:row;font-size:12px;color:#9fb0c3;cursor:pointer}
+.remember input{width:auto;margin:0}
+.board-filters{display:flex;flex-direction:column;gap:8px;margin:0 0 14px}
+.board-filters .sport-tabs{display:flex;flex-wrap:wrap;gap:6px}
+#nightly-markets{margin-bottom:12px}
+#nightly-markets{grid-template-columns:repeat(3,1fr)}@media(max-width:700px){#nightly-markets{grid-template-columns:1fr}}

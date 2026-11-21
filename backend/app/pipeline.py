@@ -259,36 +259,45 @@ def slate_day(start: Optional[str]) -> str:
 
 
 async def auto_log(snap: dict, store) -> int:
-    """Log every heavy-sharp play that has not started yet, once, with a flat unit stake."""
+    """Log every heavy-sharp market (moneyline, spread, total) that has not started yet, once, with a flat unit stake."""
     existing = {p.get("log_key") for p in await store.plays_list() if p.get("log_key")}
     now = datetime.now(timezone.utc)
     added = 0
     for raw in snap["games"]:
         view = build_game_view(raw, settings.NIGHTLY_MIN_TOTAL)
-        if not view["visible"] or not any(f["type"] == "heavy_sharp" for f in view["flags"]):
-            continue
         if raw.get("start"):
             try:
                 if datetime.fromisoformat(raw["start"].replace("Z", "+00:00")) <= now:
                     continue  # never log a play after the game started
             except ValueError:
                 pass
-        team = view["sharp_side"]
         day = slate_day(raw.get("start"))
-        log_key = f"{day}:{raw['sport']}:{raw['key']}:{team}"
-        if log_key in existing:
-            continue
-        bp = best_prices(raw.get("odds", {}), team) or (
-            {"book": "pinnacle", "decimal": raw["odds"]["pinnacle"][team]} if team in raw.get("odds", {}).get("pinnacle", {}) else None
-        )
-        dec = bp["decimal"] if bp else 1.91  # no odds feed connected: assume -110 and say so in the notes
-        await store.play_add({
-            "sport": raw["sport"], "game_key": raw["key"], "team": team, "book": bp["book"] if bp else None,
-            "description": f"{team} ML ({raw['away']} @ {raw['home']})", "odds_decimal": dec,
-            "stake": settings.NIGHTLY_UNIT, "source": "sharp", "day": day, "log_key": log_key,
-            "notes": f"auto-logged: {view['sharp_pct']:.0f}% of ${view['total']:,.0f}" + ("" if bp else " · assumed -110, no odds feed"),
-        })
-        added += 1
+        for m in view.get("markets", []):
+            if not m["heavy"] or m["total"] < settings.NIGHTLY_MIN_TOTAL:
+                continue
+            mtype, side, line = m["type"], m["side"], m.get("line")
+            if mtype == "moneyline":
+                log_key = f"{day}:{raw['sport']}:{raw['key']}:{side}"  # unchanged so older logs never duplicate
+                bp = best_prices(raw.get("odds", {}), side) or (
+                    {"book": "pinnacle", "decimal": raw["odds"]["pinnacle"][side]} if side in raw.get("odds", {}).get("pinnacle", {}) else None
+                )
+                play_line = None
+            else:
+                play_line = line if mtype == "total" else (line if side == raw["home"] else -line)
+                log_key = f"{day}:{raw['sport']}:{raw['key']}:{mtype}:{side}:{play_line:g}"
+                bp = None
+            if log_key in existing:
+                continue
+            dec = bp["decimal"] if bp else 1.91  # no price for this market: assume -110 and say so in the notes
+            await store.play_add({
+                "sport": raw["sport"], "game_key": raw["key"], "team": side, "book": bp["book"] if bp else None,
+                "description": f"{m['label']} ({raw['away']} @ {raw['home']})", "odds_decimal": dec,
+                "stake": settings.NIGHTLY_UNIT, "source": "sharp", "day": day, "log_key": log_key,
+                "market": mtype, "line": play_line,
+                "notes": f"auto-logged: {m['side_pct']:.0f}% of ${m['total']:,.0f}" + ("" if bp else " · assumed -110"),
+            })
+            existing.add(log_key)
+            added += 1
     return added
 
 
@@ -300,8 +309,32 @@ async def seed_demo_history(store) -> None:
         await store.play_add(row)
 
 
+def _grade_won(p: dict, f: dict, sport: str) -> Optional[bool] | str:
+    """True/False/None(push) for a play against one final score, or 'skip' when the game does not match."""
+    names = list(f["scores"])
+    parts = [x.strip() for x in (p.get("game_key") or "").split(" v ")]
+    if len(parts) == 2 and not all(any(same_team(n, x, sport) for n in names) for x in parts):
+        return "skip"
+    mtype = p.get("market") or "moneyline"
+    if mtype == "total":
+        if len(parts) != 2:
+            return "skip"
+        line, pts = float(p["line"]), sum(f["scores"].values())
+        if pts == line:
+            return None
+        return (pts > line) == (p["team"] == "OVER")
+    mine = next((t for t in names if same_team(t, p["team"], sport)), None)
+    if not mine:
+        return "skip"
+    opp = next(t for t in names if t != mine)
+    diff = f["scores"][mine] - f["scores"][opp]
+    if mtype == "spread":
+        diff += float(p["line"])
+    return None if diff == 0 else diff > 0
+
+
 async def auto_grade(store) -> int:
-    """Grade open moneyline plays from final scores (needs ODDS_API_KEY). Returns number graded."""
+    """Grade open moneyline / spread / total plays from final scores (needs ODDS_API_KEY). Returns number graded."""
     if settings.DEMO_MODE or not settings.ODDS_API_KEY:
         return 0
     plays = [p for p in await store.plays_list() if p["status"] == "open" and p.get("team") and p.get("sport")]
@@ -315,15 +348,9 @@ async def auto_grade(store) -> int:
             if p["sport"] != sport or p["status"] != "open":
                 continue
             for f in finals:
-                names = list(f["scores"])
-                mine = next((t for t in names if same_team(t, p["team"], sport)), None)
-                if not mine:
+                won = _grade_won(p, f, sport)
+                if won == "skip":
                     continue
-                opp = next(t for t in names if t != mine)
-                parts = [x.strip() for x in (p.get("game_key") or "").split(" v ")]
-                if len(parts) == 2 and not any(same_team(opp, x, sport) for x in parts):
-                    continue  # same team, different opponent (e.g. a play from another night)
-                won = None if f["scores"][mine] == f["scores"][opp] else f["scores"][mine] > f["scores"][opp]
                 await store.play_update(p["id"], grade(p, won))
                 p["status"] = "done"
                 n += 1

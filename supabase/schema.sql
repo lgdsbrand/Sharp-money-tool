@@ -17,10 +17,14 @@ create table if not exists public.plays (
   notes text,
   day text,                            -- the "night" (yyyy-mm-dd, in DISPLAY_TZ)
   log_key text unique,                 -- prevents logging the same play twice
+  market text,
+  line double precision,
   user_id text                         -- owner of a manual play ('' = shared / auto-logged)
 );
 -- upgrading an older project? this adds the new column safely:
 alter table public.plays add column if not exists user_id text;
+alter table public.plays add column if not exists market text;            -- moneyline | spread | total
+alter table public.plays add column if not exists line double precision;  -- the play's own spread / total number
 create index if not exists plays_day_idx on public.plays (day);
 
 -- The API talks to Supabase with the service_role key (server only). Turning RLS on with no

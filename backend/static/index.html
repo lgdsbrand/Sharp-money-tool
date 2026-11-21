@@ -25,6 +25,7 @@ window.addEventListener('error', function (e) {
     <label id="auth-name-row" hidden>Name<input id="auth-name" type="text" autocomplete="name" placeholder="Your name"></label>
     <label>Email<input id="auth-email" type="email" autocomplete="email" required placeholder="you@example.com"></label>
     <label>Password<input id="auth-pass" type="password" autocomplete="current-password" required minlength="8" placeholder="At least 8 characters"></label>
+    <label class="remember"><input type="checkbox" id="auth-remember" checked> <span>Remember me on this device</span></label>
     <p class="auth-error" id="auth-error" hidden></p>
     <button class="btn primary" type="submit" id="auth-submit">Log in</button>
     <p class="auth-switch"><span id="auth-switch-text">No account yet?</span> <a href="#" id="auth-switch">Create one</a></p>
@@ -75,7 +76,7 @@ window.addEventListener('error', function (e) {
       <div class="metric-grid" id="metrics"></div>
 
       <div class="section-heading"><div><h2>Top sharp plays</h2><p>Where the exchange money is lopsided. Heavy sharp means 65%+ of the money on one side.</p></div><span class="result-count" id="top-count"></span></div>
-      <div class="table-wrap"><table><thead><tr><th>GAME</th><th>SHARP SIDE</th><th>EXCHANGE MONEY</th><th>PUBLIC ON THIS SIDE</th><th>MODEL</th><th>BEST EV</th><th>FLAGS</th><th></th></tr></thead><tbody id="top-rows"></tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>GAME</th><th>SHARP SIDE</th><th>EXCHANGE MONEY</th><th>PUBLIC ON THIS SIDE</th><th>BEST EV</th><th>FLAGS</th><th></th></tr></thead><tbody id="top-rows"></tbody></table></div>
 
       <div class="section-heading gap"><div><h2>Sharp vs public</h2><p>Games where the public is on one side and the big money is on the other.</p></div><span class="result-count" id="disc-count"></span></div>
       <div class="table-wrap"><table><thead><tr><th>GAME</th><th>SHARP LEAN</th><th>PUBLIC LEAN (BETS / HANDLE)</th><th>EXCHANGE MONEY</th><th>FLAGS</th><th></th></tr></thead><tbody id="disc-rows"></tbody></table></div>
@@ -85,6 +86,7 @@ window.addEventListener('error', function (e) {
     <!-- MARKET BOARD -->
     <section id="view-board" class="view">
       <div class="section-heading"><div><h2>Full market board</h2><p>Every game above your minimum, source by source, both sides.</p></div><span class="result-count" id="board-count"></span></div>
+      <div class="board-filters"><div class="sport-tabs" id="board-sports"></div><div class="sport-tabs" id="board-days"></div></div>
       <div id="board-cards" class="market-cards"></div>
     </section>
 
@@ -108,6 +110,7 @@ window.addEventListener('error', function (e) {
     <!-- NIGHTLY -->
     <section id="view-nightly" class="view">
       <div class="section-heading"><div><h2>Nightly log</h2><p>Every night the tool logs the heavy sharp plays before tip-off at a flat unit stake, then grades them from the final scores.</p></div><span class="result-count" id="nightly-count"></span></div>
+      <div class="metric-grid" id="nightly-markets"></div>
       <div class="metric-grid" id="nightly-stats"></div>
       <div id="nightly-days"></div>
     </section>
@@ -169,7 +172,7 @@ window.addEventListener('error', function (e) {
     </section>
 
 
-    <footer>SHARPEDGE · SHARP MONEY TOOL v2.2.3 <span id="foot-note"></span></footer>
+    <footer>SHARPEDGE · SHARP MONEY TOOL v2.3.0 <span id="foot-note"></span></footer>
   </main>
 </div>
 <div class="toast" id="toast" hidden></div>
@@ -206,6 +209,6 @@ window.addEventListener('error', function (e) {
         <p class="modal-note">Tip: use the &minus; / + buttons by <b>Min liquidity</b> to hide small markets. This is information, not betting advice.</p>
       </div>
     </div>
-<script src="/static/app.js?v=2.2.0"></script>
+<script src="/static/app.js?v=2.3.0"></script>
 </body>
 </html>

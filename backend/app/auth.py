@@ -17,6 +17,8 @@ from typing import Optional
 from .config import settings
 
 SESSION_DAYS = 30
+REMEMBER_DAYS = 180  # "Remember me" ticked
+SHORT_DAYS = 1       # not ticked: this browser session only
 _ITER = 200_000
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _fails: dict[str, list[float]] = {}
@@ -57,7 +59,7 @@ def _throttle(key: str) -> None:
         raise AuthError("Too many attempts. Wait 10 minutes and try again.", 429)
 
 
-async def signup(store, email: str, password: str, name: str = "") -> tuple[dict, str]:
+async def signup(store, email: str, password: str, name: str = "", remember: bool = True) -> tuple[dict, str]:
     email = _clean(email)
     if not _EMAIL.match(email):
         raise AuthError("Enter a valid email address.")
@@ -73,10 +75,10 @@ async def signup(store, email: str, password: str, name: str = "") -> tuple[dict
     user = {"id": secrets.token_hex(8), "email": email, "name": (name or "").strip()[:60], "salt": salt.hex(),
             "pw": _hash(password, salt), "created": datetime.now(timezone.utc).isoformat()}
     await store.kv_set(_ekey(email), user)
-    return public(user), await _new_session(store, user)
+    return public(user), await _new_session(store, user, remember)
 
 
-async def login(store, email: str, password: str, ip: str = "") -> tuple[dict, str]:
+async def login(store, email: str, password: str, ip: str = "", remember: bool = True) -> tuple[dict, str]:
     email = _clean(email)
     key = f"{email}|{ip}"
     _throttle(key)
@@ -86,12 +88,12 @@ async def login(store, email: str, password: str, ip: str = "") -> tuple[dict, s
         _fails.setdefault(key, []).append(time.time())
         raise AuthError("Wrong email or password.", 401)
     _fails.pop(key, None)
-    return public(user), await _new_session(store, user)
+    return public(user), await _new_session(store, user, remember)
 
 
-async def _new_session(store, user: dict) -> str:
+async def _new_session(store, user: dict, remember: bool = True) -> str:
     token = secrets.token_urlsafe(32)
-    exp = (datetime.now(timezone.utc) + timedelta(days=SESSION_DAYS)).isoformat()
+    exp = (datetime.now(timezone.utc) + timedelta(days=REMEMBER_DAYS if remember else SHORT_DAYS)).isoformat()
     await store.kv_set("session:" + _tok_hash(token), {"email": user["email"], "exp": exp})
     return token
 

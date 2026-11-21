@@ -117,10 +117,10 @@ def history(unit: float = 25.0) -> list[dict]:
     """Fake previous nights for the Nightly log page (mirrors the 'Day 1 returns' card Tyler showed)."""
     now = datetime.now(timezone.utc)
     nights = [
-        (1, [("nhl", "WSH", "WSH @ OTT", 1.952, "won"), ("nba", "BOS", "BOS @ PHI", 1.84, "won"),
+        (0, [("nhl", "WSH", "WSH @ OTT", 1.952, "won"), ("nba", "BOS", "BOS @ PHI", 1.84, "won"),
              ("nhl", "FLA", "FLA @ TOR", 1.847, "won"), ("nba", "ORL", "ORL @ SAC", 1.62, "won"),
              ("ncaaf", "miami oh", "Miami (OH) @ Ohio", 1.98, "lost")]),
-        (2, [("nfl", "KC", "KC @ BUF", 1.91, "lost"), ("mlb", "LAD", "LAD @ SD", 1.54, "won"),
+        (1, [("nfl", "KC", "KC @ BUF", 1.91, "lost"), ("mlb", "LAD", "LAD @ SD", 1.54, "won"),
              ("nba", "MIA", "MIA @ UTA", 1.71, "won"), ("nhl", "COL", "COL @ VGK", 1.8, "lost")]),
     ]
     rows = []

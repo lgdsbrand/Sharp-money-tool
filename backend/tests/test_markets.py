@@ -55,3 +55,31 @@ def test_keys_are_scrubbed():
     from app.pipeline import _status, scrub
     assert "SECRET123" not in scrub("401 for url 'https://x/odds?apiKey=SECRET123&markets=h2h'")
     assert "SECRET123" not in _status("odds_api", "live", False, 0, "url ?apiKey=SECRET123&x=1")["error"]
+
+
+def test_top_play_rows_one_row_per_market():
+    from app.analysis import top_play_rows
+    v = build_game_view({**raw(), "alts": {**raw()["alts"], "total:44.5": {"mtype": "total", "line": 44.5, "liquidity": {"novig": {"OVER": 900000, "UNDER": 100000}}}}}, 0)
+    rows = top_play_rows([v], 0)
+    assert sorted(r["top_market"]["type"] for r in rows) == ["moneyline", "spread", "total"]
+    assert all(r["key"] == "k" for r in rows)
+
+
+def test_grade_won_markets():
+    from app.pipeline import _grade_won
+    f = {"scores": {"BOS": 110.0, "PHI": 100.0}}
+    base = {"game_key": "BOS v PHI", "team": "BOS"}
+    assert _grade_won({**base, "market": "moneyline"}, f, "nba") is True
+    assert _grade_won({**base, "market": "spread", "line": -9.5}, f, "nba") is True
+    assert _grade_won({**base, "market": "spread", "line": -10}, f, "nba") is None
+    assert _grade_won({**base, "market": "spread", "line": -10.5}, f, "nba") is False
+    assert _grade_won({**base, "team": "OVER", "market": "total", "line": 209.5}, f, "nba") is True
+    assert _grade_won({**base, "team": "UNDER", "market": "total", "line": 209.5}, f, "nba") is False
+    assert _grade_won({**base, "team": "OVER", "market": "total", "line": 210}, f, "nba") is None
+    assert _grade_won({**base, "game_key": "LAL v MIA", "market": "moneyline"}, f, "nba") == "skip"
+
+
+def test_market_stats_defaults_to_moneyline():
+    from app.store import market_stats
+    s = market_stats([{"status": "won", "stake": 25, "pnl": 20}, {"market": "total", "status": "lost", "stake": 25, "pnl": -25}])
+    assert s["moneyline"]["won"] == 1 and s["total"]["lost"] == 1 and s["spread"]["won"] == 0

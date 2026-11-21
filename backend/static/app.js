@@ -20,12 +20,17 @@ const num = (v, f) => (Number.isFinite(parseFloat(v)) ? parseFloat(v) : f);
 /* ---------- settings (localStorage, always wrapped) ---------- */
 function loadSettings() { try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem('sharp_settings') || '{}') }; } catch { return { ...DEFAULTS }; } }
 function saveSettings(s) { try { localStorage.setItem('sharp_settings', JSON.stringify(s)); } catch { /* private mode: keep in memory only */ } }
-const state = { q: '', auth: null, authMode: 'login', logos: {}, s: loadSettings(), view: 'overview', sport: null, minLiq: null, data: null, sources: null, byId: new Map(), timer: null };
+const state = { q: '', auth: null, authMode: 'login', logos: {}, s: loadSettings(), view: 'overview', sport: null, day: 'all', minLiq: null, data: null, sources: null, byId: new Map(), timer: null };
 state.sport = state.s.sport; state.minLiq = state.s.minLiq;
 
 /* ---------- accounts ---------- */
-function getToken() { try { return localStorage.getItem('sharp_auth') || ''; } catch { return ''; } }
-function setToken(t) { try { t ? localStorage.setItem('sharp_auth', t) : localStorage.removeItem('sharp_auth'); } catch { /* ignore */ } }
+function getToken() { try { return localStorage.getItem('sharp_auth') || sessionStorage.getItem('sharp_auth') || ''; } catch { return ''; } }
+function setToken(t, remember = true) {
+  try {
+    localStorage.removeItem('sharp_auth'); sessionStorage.removeItem('sharp_auth');
+    if (t) (remember ? localStorage : sessionStorage).setItem('sharp_auth', t);
+  } catch { /* ignore */ }
+}
 function showAuth(mode) {
   if (mode) state.authMode = mode;
   const signup = state.authMode === 'signup';
@@ -159,14 +164,13 @@ function renderOverview() {
     const opp = mk.sides[0] === mk.side ? mk.sides[1] : mk.sides[0];
     const ex = Object.entries(mk.liquidity).map(([bk, l]) => `<span class="ex-chip">${badge(bk)}${k(l[mk.side] || 0)}<small>/ ${k(l[opp] || 0)}</small></span>`).join('');
     const ev = v.best_ev ? `<span class="${v.best_ev.ev_pct >= d.thresholds.min_ev_pct ? 'positive' : 'neutral'}">${v.best_ev.ev_pct > 0 ? '+' : ''}${v.best_ev.ev_pct}%</span> <small class="muted-cell">${esc(nm(v, v.best_ev.team))} ${esc(BOOKS[v.best_ev.book] || v.best_ev.book)}</small>` : '<span class="muted-cell">—</span>';
-    const model = v.model_status === 'agrees' ? '<span class="signal-pill blue">AGREES</span>' : v.model_status === 'disagrees' ? '<span class="signal-pill red">DIFFERS</span>' : '<span class="muted-cell">—</span>';
     return `<tr><td>${gameCell(v)}</td>
       <td>${mktTag(mk)}<div class="team-big">${sideLogo(v, mk, mk.side)}${esc(sideName(v, mk, mk.side))}</div><div class="split-cell"><b>${mk.side_pct}%</b> of ${k(mk.total)}</div><div class="lean-bar"><span style="width:${mk.side_pct}%"></span></div></td>
       <td><div class="ex-list">${ex}</div></td>
       <td class="amount">${p == null ? '<span class="muted-cell">—</span>' : `${pct(p)} <small class="muted-cell">bets</small> · ${pct(h)} <small class="muted-cell">handle</small>`}</td>
-      <td>${isML ? model : '<span class="muted-cell">—</span>'}</td><td>${isML ? ev : '<span class="muted-cell">—</span>'}</td><td>${flagPills(v)}</td>
+      <td>${isML ? ev : '<span class="muted-cell">—</span>'}</td><td>${flagPills(v)}</td>
       <td>${isML ? `<button class="action-btn" data-track="${esc(id)}">+ Track</button>` : '<span class="muted-cell">ML only</span>'}</td></tr>`;
-  }).join('') : `<tr class="empty-row"><td colspan="8">No heavy sharp plays above ${k(state.minLiq)} right now. Lower the minimum with the slider.</td></tr>`;
+  }).join('') : `<tr class="empty-row"><td colspan="7">No heavy sharp plays above ${k(state.minLiq)} right now. Lower the minimum with the slider.</td></tr>`;
 
   $('disc-count').textContent = `${discs.length} GAMES`;
   $('disc-rows').innerHTML = discs.length ? discs.map((v) => {
@@ -184,9 +188,19 @@ function renderOverview() {
 }
 
 /* ---------- market board ---------- */
+const dayKey = (iso) => { const d = new Date(iso); return isNaN(d) ? 'tbd' : d.toLocaleDateString('en-CA'); };
+function dayLabel(key) {
+  if (key === 'tbd') return 'TBD';
+  const t = new Date(), tk = t.toLocaleDateString('en-CA'); t.setDate(t.getDate() + 1);
+  if (key === tk) return 'Today'; if (key === t.toLocaleDateString('en-CA')) return 'Tomorrow';
+  return new Date(key + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
 function renderBoard() {
   const d = state.data; if (!d) return;
-  const games = d.games.filter(matches);
+  const days = [...new Set(d.games.map((g) => dayKey(g.start)))].sort();
+  if (state.day !== 'all' && !days.includes(state.day)) state.day = 'all';
+  $('board-days').innerHTML = [['all', 'All days'], ...days.map((x) => [x, dayLabel(x)])].map(([v, l]) => `<button class="sport-tab ${state.day === v ? 'active' : ''}" data-day="${v}">${l}</button>`).join('');
+  const games = d.games.filter(matches).filter((v) => state.day === 'all' || dayKey(v.start) === state.day);
   $('board-count').textContent = `${games.length} GAMES`;
   $('board-cards').innerHTML = games.length ? games.map((v) => {
     const id = register(v), a = v.away, h = v.home;
@@ -253,17 +267,20 @@ function renderPlays(d) {
 async function loadNightly() {
   let d; try { d = await api('/api/nightly'); } catch (e) { $('nightly-days').innerHTML = `<div class="panel empty-state">${esc(e.message)}</div>`; return; }
   const o = d.overall;
-  $('nightly-count').textContent = `${d.days.length} NIGHTS · ${money(d.unit)} UNIT`;
+  $('nightly-count').textContent = `TODAY & YESTERDAY · ${money(d.unit)} UNIT`;
   $('nightly-stats').innerHTML =
     metricCard('ALL-TIME RECORD', '◎', `${o.won}-${o.lost}${o.push ? '-' + o.push : ''}`, o.win_pct == null ? 'Nothing settled yet' : `${o.win_pct}% win rate`) +
     metricCard('TOTAL PROFIT', '$', `<span class="${o.pnl >= 0 ? 'pos' : 'neg'}">${signed(o.pnl)}</span>`, `at ${money(d.unit)} flat per play`) +
     metricCard('RETURN ON SETTLED', '↗', o.roi_pct == null ? '—' : `<span class="${o.roi_pct >= 0 ? 'pos' : 'neg'}">${o.roi_pct > 0 ? '+' : ''}${o.roi_pct}%</span>`, `${money(o.staked)} settled stake`) +
     metricCard('STILL OPEN', '◷', o.open, 'Graded automatically after the game');
   const total = d.days.length;
+  const mk = d.markets || {}, mrec = (m, label, icon) => { const x = mk[m] || { won: 0, lost: 0, push: 0 };
+    return metricCard(label, icon, `${x.won}-${x.lost}${x.push ? '-' + x.push : ''}`, x.win_pct == null ? 'Nothing settled yet' : `${x.win_pct}% · <span class="${(x.pnl || 0) >= 0 ? 'pos' : 'neg'}">${signed(x.pnl || 0)}</span>`); };
+  $('nightly-markets').innerHTML = mrec('moneyline', 'MONEYLINES · ALL TIME', 'ML') + mrec('spread', 'SPREADS · ALL TIME', '±') + mrec('total', 'TOTALS · ALL TIME', 'O/U');
   $('nightly-days').innerHTML = d.days.length ? d.days.map((day, i) => {
     const dt = new Date(day.day + 'T12:00:00');
     const label = dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-    return `<article class="night-card"><div class="night-top"><div><small>SHARP MONEY · NIGHTLY LOG${d.demo ? ' <span class="tag-demo">DEMO DATA</span>' : ''}</small><h3>Day ${total - i} · ${day.final ? 'Returns' : 'In progress'}</h3></div><span class="day-chip ${day.final ? '' : 'open'}">${esc(label)}</span></div>
+    return `<article class="night-card"><div class="night-top"><div><small>SHARP MONEY · NIGHTLY LOG${d.demo ? ' <span class="tag-demo">DEMO DATA</span>' : ''}</small><h3>${dayLabel(day.day)} · ${day.final ? 'Returns' : 'In progress'}</h3></div><span class="day-chip ${day.final ? '' : 'open'}">${esc(label)}</span></div>
       <div class="night-tiles">
         <div class="night-tile"><small>RECORD</small><b>${esc(day.record)}</b></div>
         <div class="night-tile"><small>PROFIT</small><b class="${day.profit >= 0 ? 'pos' : 'neg'}">${signed(day.profit)}</b></div>
@@ -371,7 +388,8 @@ async function load() {
   }
 }
 function syncControls() {
-  $('sport-tabs').innerHTML = SPORTS.map(([v, l]) => `<button class="sport-tab ${state.sport === v ? 'active' : ''}" data-sport="${v}">${l}</button>`).join('');
+  const chips = SPORTS.map(([v, l]) => `<button class="sport-tab ${state.sport === v ? 'active' : ''}" data-sport="${v}">${l}</button>`).join('');
+  $('sport-tabs').innerHTML = chips; $('board-sports').innerHTML = chips;
   $('min-liq').value = state.minLiq; $('min-liq-val').textContent = k(state.minLiq);
   $('bankroll-input').value = state.s.bankroll; $('risk-input').value = state.s.risk; $('kelly-input').value = state.s.kelly;
   calcBankroll();
@@ -386,9 +404,10 @@ function show(view) {
 
 /* ---------- events ---------- */
 document.addEventListener('click', async (e) => {
-  const t = e.target.closest('[data-view],[data-sport],[data-track],[data-del]'); if (!t) return;
+  const t = e.target.closest('[data-view],[data-sport],[data-day],[data-track],[data-del]'); if (!t) return;
   if (t.dataset.view) show(t.dataset.view);
-  else if (t.dataset.sport) { state.sport = t.dataset.sport; syncControls(); load(); }
+  else if (t.dataset.sport) { state.sport = t.dataset.sport; state.day = 'all'; syncControls(); load(); }
+  else if (t.dataset.day) { state.day = t.dataset.day; renderBoard(); }
   else if (t.dataset.track) trackGame(t.dataset.track);
   else if (t.dataset.del) { try { await api('/api/plays/' + t.dataset.del, { method: 'DELETE' }); loadPlays(); } catch (err) { toast(err.message, true); } }
 });
@@ -409,8 +428,8 @@ $('auth-form').addEventListener('submit', async (e) => {
   e.preventDefault(); const err = $('auth-error'); err.hidden = true; $('auth-submit').disabled = true;
   const signup = state.authMode === 'signup';
   try {
-    const d = await api(signup ? '/api/auth/signup' : '/api/auth/login', { method: 'POST', body: JSON.stringify({ email: $('auth-email').value, password: $('auth-pass').value, name: $('auth-name').value }) });
-    setToken(d.token); state.auth.user = d.user; $('auth-pass').value = ''; paintAccount(); $('auth-screen').hidden = true; state.sources = null; loadPlays(); load();
+    const d = await api(signup ? '/api/auth/signup' : '/api/auth/login', { method: 'POST', body: JSON.stringify({ email: $('auth-email').value, password: $('auth-pass').value, name: $('auth-name').value, remember: $('auth-remember').checked }) });
+    setToken(d.token, $('auth-remember').checked); state.auth.user = d.user; $('auth-pass').value = ''; paintAccount(); $('auth-screen').hidden = true; state.sources = null; loadPlays(); load();
   } catch (x) { err.textContent = x.message; err.hidden = false; }
   $('auth-submit').disabled = false;
 });

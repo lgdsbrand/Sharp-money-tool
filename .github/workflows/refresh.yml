@@ -1,9 +1,9 @@
-# Optional: keeps data fresh and grades finished games even if the Render instance sleeps (free plan).
+# Optional: keeps the server awake (free plan sleeps after 15 min idle), data fresh and grades finished games even if the Render instance sleeps (free plan).
 # Add repo secrets API_URL (https://your-app.onrender.com) and ADMIN_TOKEN. Until API_URL exists the job does nothing.
 name: refresh-sharp-money
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/10 * * * *"
   workflow_dispatch: {}
 jobs:
   refresh:
@@ -12,6 +12,9 @@ jobs:
       API_URL: ${{ secrets.API_URL }}
       ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
     steps:
+      - name: Keep the server awake
+        run: |
+          curl -fsS -m 120 "${API_URL:-https://sharp-money-tool.onrender.com}/api/health" || true
       - name: Ping the refresh endpoint
         if: ${{ env.API_URL != '' }}
         run: |
